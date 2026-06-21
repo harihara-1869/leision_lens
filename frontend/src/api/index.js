@@ -1,4 +1,4 @@
-import { MOCK_PATIENTS, MOCK_SCAN_RESULT } from '../mock/mockPatients.js'
+import { MOCK_PATIENTS } from '../mock/mockPatients.js'
 import { MOCK_STATS, MOCK_ACTIVITY, MOCK_CLINICIAN } from '../mock/mockDashboard.js'
 
 const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
@@ -108,8 +108,8 @@ function scanToResultShape(scan) {
           day: '2-digit', month: 'short', year: 'numeric',
         })
       : '—',
-    originalUrl: MOCK_SCAN_RESULT.originalUrl,
-    heatmapUrl:  scan.heatmap_path || MOCK_SCAN_RESULT.heatmapUrl,
+    originalUrl: scan.original_image_path,
+    heatmapUrl:  scan.heatmap_path,
     lesionProbs: {
       MA: Math.round((scan.lesions?.MA ?? scan.prob_ma ?? 0) * 100),
       HE: Math.round((scan.lesions?.HE ?? scan.prob_he ?? 0) * 100),
@@ -117,6 +117,8 @@ function scanToResultShape(scan) {
       SE: Math.round((scan.lesions?.SE ?? scan.prob_se ?? 0) * 100),
     },
     aiInsight: GRADE_DESCRIPTIONS[scan.grade] || '',
+    segOverlayUrl: scan.seg_overlay_url,
+    segMasks: scan.seg_masks,
   }
 }
 
@@ -141,23 +143,10 @@ export async function startAnalysis(scanId) {
 }
 
 // ─── getScanResults — wired to /api/scans/:id ────────────────────────────────
-// Falls back to the last uploaded scan if the URL-param scanId (which
-// NewScanPage hardcodes to 1) doesn't belong to the current user.
 
 export async function getScanResults(scanId) {
-  try {
-    const scan = await getScan(scanId)
-    return scanToResultShape(scan)
-  } catch (_) {
-    const lastId = localStorage.getItem('last_scan_id')
-    if (lastId && lastId !== String(scanId)) {
-      try {
-        const scan = await getScan(lastId)
-        return scanToResultShape(scan)
-      } catch (_) {}
-    }
-    return MOCK_SCAN_RESULT
-  }
+  const scan = await getScan(scanId)
+  return scanToResultShape(scan)
 }
 
 // ─── getPatients — wired to /api/scans/ ─────────────────────────────────────
@@ -183,7 +172,7 @@ export async function getPatients({ search = '' } = {}) {
           : '—',
         drGrade:    s.grade,
         confidence: parseFloat((s.confidence * 100).toFixed(1)),
-        previewUrl: MOCK_SCAN_RESULT.originalUrl,
+        previewUrl: null,
       }))
     return { patients, total: patients.length }
   } catch (_) {

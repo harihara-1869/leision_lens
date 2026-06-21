@@ -150,7 +150,7 @@ export default function DashboardPage() {
                   {/* Action */}
                   <div className="col-span-6 sm:col-span-1 flex justify-end">
                     <button
-                      onClick={() => navigate('/scan/1/results')}
+                      onClick={() => navigate(`/scan/${item.id}/results`)}
                       className="px-4 py-2 border border-primary text-primary rounded-full text-xs font-bold hover:bg-primary hover:text-white transition-all whitespace-nowrap"
                     >
                       Review Scan

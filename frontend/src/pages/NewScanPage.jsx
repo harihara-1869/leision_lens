@@ -85,8 +85,7 @@ export default function NewScanPage() {
       const { resultId } = await startAnalysis(scanId)
 
       setAnalysisState(STATE.DONE)
-      // Navigate to the results page (mock always uses same result ID)
-      navigate('/scan/1/results')
+      navigate(`/scan/${resultId}/results`)
     } catch (err) {
       setScanError('Analysis failed. Please try again.')
       setAnalysisState(STATE.IDLE)

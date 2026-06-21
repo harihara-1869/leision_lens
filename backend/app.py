@@ -1,8 +1,8 @@
 import os
 import re
-from flask import Flask
+from flask import Flask, send_from_directory
 from backend.config import (SECRET_KEY, JWT_SECRET_KEY, DATABASE_URL,
-                            CHECKPOINT_PATH, FRONTEND_URL)
+                            CHECKPOINT_PATH, SEG_CHECKPOINT_PATH, FRONTEND_URL)
 from backend.extensions import db, jwt, cors
 from backend.routes.auth import auth_bp
 from backend.routes.predict import predict_bp
@@ -13,7 +13,7 @@ _ALLOWED_ORIGINS = [re.compile(r'http://localhost:\d+'), FRONTEND_URL]
 
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder='static', static_url_path='/static')
 
     app.config['SECRET_KEY'] = SECRET_KEY
     app.config['JWT_SECRET_KEY'] = JWT_SECRET_KEY
@@ -39,22 +39,38 @@ def create_app():
     app.register_blueprint(predict_bp, url_prefix='/api')
     app.register_blueprint(scans_bp, url_prefix='/api')
 
+    def _resolve_path(path_from_config):
+        if os.path.isabs(path_from_config):
+            return path_from_config
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.normpath(os.path.join(project_root, path_from_config))
+
     with app.app_context():
         from backend.models import user, scan  # noqa: F401 — registers models
         db.create_all()
 
-        if os.path.isabs(CHECKPOINT_PATH):
-            checkpoint = CHECKPOINT_PATH
-        else:
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            checkpoint = os.path.normpath(os.path.join(project_root, CHECKPOINT_PATH))
-
+        # ── Load DR grading model ────────────────────────────────────────
+        grading_ckpt = _resolve_path(CHECKPOINT_PATH)
         try:
             from backend.ml.inference import init_model
-            init_model(checkpoint)
+            init_model(grading_ckpt)
         except Exception as exc:
-            print(f'[WARNING] Model failed to load: {exc}')
+            print(f'[WARNING] Grading model failed to load: {exc}')
             print('[WARNING] /api/predict will return 500 until the model is available.')
+
+        # ── Load segmentation model ──────────────────────────────────────
+        seg_ckpt = _resolve_path(SEG_CHECKPOINT_PATH)
+        try:
+            from backend.ml.segmentation import init_model as init_seg
+            init_seg(seg_ckpt)
+        except Exception as exc:
+            print(f'[WARNING] Segmentation model failed to load: {exc}')
+            print('[WARNING] Lesion segmentation will be skipped during inference.')
+
+        # Ensure static output directories exist
+        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        for sub in ['heatmaps', 'segmentations', 'uploads']:
+            os.makedirs(os.path.join(static_dir, sub), exist_ok=True)
 
     return app
 

@@ -1,24 +1,12 @@
 /*
  * ResultsDetailPage — route: "/scan/:scanId/results"
  *
- * The most content-rich page — shows the full AI diagnostic output.
- *
- * Sections:
- *   1. Patient info header bar — name, ID, date, Export PDF + Finalize buttons
- *   2. Side-by-side scan images — original (grayscale) + AI heatmap overlay
- *   3. DR Severity Scale — 5-step track (No DR → Proliferative), active node
- *   4. Lesion Probabilities panel — MA/HE/EX/SE progress bars
- *   5. AI Diagnostic Insight card — text insight + "View Full Clinical Report" link
- *
- * HOW TO CONNECT:
- *   On mount → getScanResults(scanId) → GET /api/scan/:id/results
- *   This returns: { drGrade, confidence, originalUrl, heatmapUrl,
- *                   lesionProbs: {MA, HE, EX, SE}, aiInsight, patientName, ... }
- *   "Export PDF" → GET /api/scan/:id/export (PDF download)
- *   "Finalize Diagnosis" → PATCH /api/scan/:id/finalize → marks scan as reviewed
- *
- * The heatmapUrl is the Grad-CAM output from src/gradcam.py in your project.
- * When the Flask backend serves /api/scan/:id/results, include both image URLs.
+ * Full AI diagnostic output:
+ *   1. Patient info header
+ *   2. Side-by-side: original + Grad-CAM heatmap
+ *   3. Lesion segmentation overlay with per-type toggles
+ *   4. DR Severity Scale
+ *   5. Lesion Probabilities + AI Diagnostic Insight
  */
 
 import { useState, useEffect } from 'react'
@@ -28,9 +16,9 @@ import GlassCard from '../components/ui/GlassCard.jsx'
 import Icon from '../components/ui/Icon.jsx'
 import Button from '../components/ui/Button.jsx'
 import { getScanResults } from '../api/index.js'
-import { DR_GRADE_LABELS } from '../mock/mockPatients.js'
+import { DR_GRADE_LABELS, LESION_DISPLAY } from '../mock/mockPatients.js'
 
-// DR severity scale steps — matches APTOS 2019 grade labels
+// DR severity scale
 const DR_STEPS = [
   { grade: 0, label: 'No DR' },
   { grade: 1, label: 'Mild' },
@@ -39,7 +27,7 @@ const DR_STEPS = [
   { grade: 4, label: 'Proliferative' },
 ]
 
-// Lesion type metadata — full name + color for the progress bar
+// Lesion metadata for the probability bars
 const LESION_META = {
   MA: { full: 'MA (Microaneurysms)', barColor: 'bg-primary-container' },
   HE: { full: 'HE (Hemorrhages)',    barColor: 'bg-secondary-container' },
@@ -51,6 +39,9 @@ export default function ResultsDetailPage() {
   const { scanId }        = useParams()
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [activeSegLesions, setActiveSegLesions] = useState({
+    MA: true, HE: true, EX: true, SE: true,
+  })
 
   useEffect(() => {
     getScanResults(scanId).then((data) => {
@@ -59,7 +50,13 @@ export default function ResultsDetailPage() {
     })
   }, [scanId])
 
-  // While loading, show skeleton placeholders
+  const toggleLesion = (key) => {
+    setActiveSegLesions((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  // Count how many are active
+  const activeCount = Object.values(activeSegLesions).filter(Boolean).length
+
   if (loading) {
     return (
       <PortalLayout activePage="scan">
@@ -72,30 +69,22 @@ export default function ResultsDetailPage() {
     )
   }
 
-  const drConfig = DR_GRADE_LABELS[result.drGrade]
-
   return (
     <PortalLayout activePage="scan">
-      {/* ─── 1. Patient info header ────────────────────────────────────── */}
+      {/* ─── 1. Patient info header ──────────────────────────────────── */}
       <GlassCard className="rounded-2xl p-5 md:p-6 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        {/* Patient details */}
         <div className="flex flex-wrap items-center gap-6 md:gap-8">
           <div>
             <p className="font-mono text-[10px] text-on-surface-variant uppercase tracking-widest mb-1">
               Patient Name
             </p>
-            {/*<h2 className="font-semibold text-primary">{result.patientName}</h2>*/}
           </div>
-          {/* Vertical divider */}
-          
         </div>
-
-        
       </GlassCard>
 
-      {/* ─── 2. Side-by-side scan images ──────────────────────────────── */}
+      {/* ─── 2. Side-by-side: Original + Grad-CAM ───────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        {/* Original grayscale scan */}
+        {/* Original scan */}
         <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-96">
           <img
             src={result.originalUrl}
@@ -109,9 +98,8 @@ export default function ResultsDetailPage() {
           </div>
         </div>
 
-        {/* AI Heatmap overlay (Grad-CAM output) */}
+        {/* Grad-CAM heatmap */}
         <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-96">
-          {/* Warm violet/orange gradient blend on top of heatmap */}
           <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/20 to-orange-500/20 mix-blend-overlay z-10" />
           <img
             src={result.heatmapUrl}
@@ -123,25 +111,78 @@ export default function ResultsDetailPage() {
               AI Heatmap Overlay
             </span>
           </div>
-          {/* Color legend dots */}
           <div className="absolute bottom-4 right-4 flex gap-2 z-20">
             <div className="w-2 h-2 rounded-full bg-orange-400" />
             <div className="w-2 h-2 rounded-full bg-violet-400" />
           </div>
-          {/* Active border */}
           <div className="absolute inset-0 border-2 border-primary-container/40 rounded-3xl pointer-events-none" />
         </div>
       </div>
 
-      {/* ─── 3. DR Severity Scale ─────────────────────────────────────── */}
+      {/* ─── 3. Lesion Segmentation Overlay ──────────────────────────── */}
+      <GlassCard className="rounded-3xl p-6 md:p-8 mb-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
+            Lesion Segmentation
+          </h3>
+          <span className="font-mono text-[10px] text-on-surface-variant/40">
+            {activeCount}/4 visible
+          </span>
+        </div>
+
+        {/* Segmentation image */}
+        <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-80 mb-6">
+          <img
+            src={result.segOverlayUrl}
+            alt="Lesion segmentation overlay"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+          />
+          <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
+            <span className="font-mono text-[10px] text-white uppercase tracking-widest">
+              Lesion Overlay
+            </span>
+          </div>
+        </div>
+
+        {/* Per-lesion toggle pills */}
+        <div className="flex flex-wrap gap-3 justify-center">
+          {Object.entries(LESION_DISPLAY).map(([key, meta]) => {
+            const isActive = activeSegLesions[key]
+            return (
+              <button
+                key={key}
+                onClick={() => toggleLesion(key)}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-full font-mono text-xs
+                  transition-all duration-200 border-2
+                  ${isActive
+                    ? 'bg-white/90 text-on-surface shadow-md border-transparent'
+                    : 'bg-white/20 text-on-surface-variant/50 border-outline-variant/30'
+                  }
+                `}
+              >
+                {/* Colour dot */}
+                <span
+                  className={`w-2.5 h-2.5 rounded-full transition-opacity ${
+                    isActive ? 'opacity-100' : 'opacity-30'
+                  }`}
+                  style={{ backgroundColor: meta.color }}
+                />
+                <span>{meta.short}</span>
+                <span className="text-on-surface-variant/60">{meta.full}</span>
+              </button>
+            )
+          })}
+        </div>
+      </GlassCard>
+
+      {/* ─── 4. DR Severity Scale ───────────────────────────────────── */}
       <GlassCard className="rounded-3xl p-6 md:p-8 mb-6">
         <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em] mb-8 text-center">
           Diabetic Retinopathy Severity Classification
         </h3>
 
-        {/* 5-step track */}
         <div className="relative px-6 md:px-12">
-          {/* Track line behind the dots */}
           <div className="absolute h-0.5 top-[6px] left-12 right-12 bg-outline-variant/40 rounded-full" />
 
           <div className="relative flex justify-between">
@@ -149,7 +190,6 @@ export default function ResultsDetailPage() {
               const isActive = step.grade === result.drGrade
               return (
                 <div key={step.grade} className="flex flex-col items-center gap-3 relative z-10">
-                  {/* Dot indicator */}
                   <div
                     className={`rounded-full ring-4 ring-white transition-all ${
                       isActive
@@ -157,7 +197,6 @@ export default function ResultsDetailPage() {
                         : 'w-3 h-3 bg-outline-variant/50'
                     }`}
                   />
-                  {/* Label */}
                   {isActive ? (
                     <div className="flex flex-col items-center gap-1">
                       <div className="bg-primary-container px-3 py-0.5 rounded-full">
@@ -176,9 +215,9 @@ export default function ResultsDetailPage() {
         </div>
       </GlassCard>
 
-      {/* ─── 4 + 5. Lesion Probabilities + AI Insight (2 columns) ─────── */}
+      {/* ─── 5. Lesion Probabilities + AI Insight ───────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Lesion probability bars (2/3 width) */}
+        {/* Lesion probability bars */}
         <GlassCard className="col-span-1 md:col-span-2 rounded-3xl p-6 md:p-8">
           <div className="flex justify-between items-end mb-8">
             <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
@@ -212,9 +251,8 @@ export default function ResultsDetailPage() {
           </div>
         </GlassCard>
 
-        {/* AI Diagnostic Insight (1/3 width) */}
+        {/* AI Diagnostic Insight */}
         <GlassCard className="col-span-1 rounded-3xl p-6 md:p-8 flex flex-col bg-primary/5 border border-primary/20">
-          {/* Brain / neurology icon */}
           <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-sm">
             <Icon name="neurology" className="text-primary text-2xl" />
           </div>
@@ -224,20 +262,6 @@ export default function ResultsDetailPage() {
           <p className="text-sm text-on-surface-variant leading-relaxed flex-1">
             {result.aiInsight}
           </p>
-
-          {/* Link to full report */}
-          {/* <div className="mt-6 pt-6 border-t border-primary/10">
-            <a
-              href="#"
-              className="font-mono text-xs font-bold text-primary flex items-center gap-2 group uppercase tracking-widest"
-            >
-              View Full Clinical Report
-              <Icon
-                name="arrow_forward"
-                className="text-sm group-hover:translate-x-1 transition-transform"
-              />
-            </a>
-          </div> */}
         </GlassCard>
       </div>
     </PortalLayout>

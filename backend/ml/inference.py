@@ -1,4 +1,5 @@
 import io
+import os
 import numpy as np
 import cv2
 import torch
@@ -142,3 +143,61 @@ def predict(image_bytes: bytes) -> dict:
             'SE': float(lesion_probs[3]),
         },
     }
+
+
+# ── Grad-CAM heatmap generation ──────────────────────────────────────────────
+class _GradeOnlyModel(nn.Module):
+    """Wraps DRMultiTaskModel to return only grade_logits for Grad-CAM."""
+    def __init__(self, full_model):
+        super().__init__()
+        self.backbone = full_model.backbone
+        self.grade_head = full_model.grade_head
+
+    def forward(self, x):
+        return self.grade_head(self.backbone(x))
+
+
+def generate_gradcam(image_bytes: bytes, predicted_grade: int,
+                     alpha: float = 0.5) -> bytes:
+    """
+    Generate Grad-CAM heatmap overlay for the predicted grade.
+
+    Returns PNG-encoded bytes of the overlay image (512×512 BGR).
+    """
+    from pytorch_grad_cam import GradCAM
+    from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+
+    if _model is None:
+        raise RuntimeError('Model not loaded')
+
+    # Preprocess for Grad-CAM (reuses the same pipeline, but needs gradients)
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    original_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if original_bgr is None:
+        raise ValueError('Could not decode image')
+    original_bgr = cv2.resize(original_bgr, (512, 512))
+
+    tensor = _preprocess(image_bytes)
+
+    # Wrap model to expose grade_logits
+    grade_model = _GradeOnlyModel(_model).to(DEVICE)
+    grade_model.eval()
+
+    # Target: last conv layer before global pooling
+    target_layers = [grade_model.backbone.conv_head]
+
+    cam = GradCAM(model=grade_model, target_layers=target_layers)
+    targets = [ClassifierOutputTarget(predicted_grade)]
+    grayscale_cam = cam(input_tensor=tensor, targets=targets)
+    heatmap = grayscale_cam[0]  # (512, 512) in [0, 1]
+
+    # Apply jet colormap
+    heatmap_uint8 = np.uint8(255 * heatmap)
+    heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
+    overlay = cv2.addWeighted(heatmap_colored, alpha, original_bgr, 1.0 - alpha, 0)
+
+    # Encode to PNG bytes
+    success, png_bytes = cv2.imencode('.png', overlay)
+    if not success:
+        raise RuntimeError('Failed to encode Grad-CAM overlay')
+    return png_bytes.tobytes()

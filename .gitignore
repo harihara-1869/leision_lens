@@ -9,6 +9,9 @@ outputs/checkpoints/
 *.pt
 *.npy
 
+#Testing / Evaluation
+evaluation/
+
 # Python
 venv/
 __pycache__/
@@ -34,9 +37,15 @@ yarn-error.log*
 # OS files
 .DS_Store
 
+# Generated backend static files
+backend/static/heatmaps/
+backend/static/segmentations/
+backend/static/uploads/
+
 # Kaggle credentials - NEVER commit this
 kaggle.json
 .kaggle/
 
 # Claude Code internal files
 .claude/
+.commandcode

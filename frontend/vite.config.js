@@ -2,17 +2,19 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // Vite config — serves the app on localhost:5173 by default.
-// The `proxy` block forwards /api/* requests to the Flask backend
-// (localhost:5000) so you never deal with CORS during development.
-// When you build the Flask backend, just change the target port here.
+// The `proxy` block forwards /api and /static requests to the Flask
+// backend (localhost:5000) so images (Grad-CAM, segmentation overlays,
+// original uploads) are loaded from Flask without CORS issues.
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      // All requests starting with /api are forwarded to the Flask backend.
-      // Change the target URL when your backend is running on a different port.
       '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+      '/static': {
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
