@@ -9,9 +9,6 @@ outputs/checkpoints/
 *.pt
 *.npy
 
-#Testing / Evaluation
-evaluation/
-
 # Python
 venv/
 __pycache__/
