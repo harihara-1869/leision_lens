@@ -2,6 +2,10 @@
 data/
 outputs/preprocessed/
 outputs/*.png
+evaluation/**/*.png
+evaluation/evaluation_outputs/**/*.png
+evaluation/ evaluation_outputs_v2/**/*.png
+evaluation/outputs_seg/**/*.png
 
 # Model checkpoints - too large
 outputs/checkpoints/
