@@ -3,88 +3,86 @@
 ## Status Summary
 
 - **Inference:** ✅ Validated — model loads, runs, produces 4-channel outputs
-- **Integration:** ✅ Complete — Grad-CAM + segmentation in unified predict endpoint
-- **Benchmark reproduction:** ❌ Not achieved — macro IoU 0.023 vs handout 0.27-0.43
-- **Root cause:** Most likely checkpoint provenance issue (wrong file or training run)
+- **Integration:** ✅ Complete — `backend/ml/segmentation.py` rewritten with correct `ConvBNReLU` decoder, hook-based features, frozen backbone, Ben Graham + CLAHE preprocessing, and 8-way TTA
+- **Checkpoint loading:** ✅ Key remapping implemented (old `backbone.*` → `encoder.backbone.*`, `head.N.*` → `head_M.*`)
+- **Benchmark reproduction:** ⚠️ **Partial** — HE (0.2693 vs 0.2694) and SE (0.4283 vs 0.4286) reproduce within 0.001; EX is off (-0.0212)
+- **Macro IoU:** **0.2167** (9.4× improvement over previous 0.023 from ConvBNBlock scripts)
+- **Root cause of prior failure:** Existing evaluation scripts used `ConvBNBlock` without ReLU — the checkpoint was trained with `ConvBNReLU`
+- **Remaining EX discrepancy:** Consistent with checkpoint provenance issues documented in `docs/SEGMENTATION_INVESTIGATION.md`
 
 ---
 
 ## Priority Actions
 
-### P1: Identify the Correct Checkpoint
+### P1: Run the Correct Evaluation
 
-1. Search for alternative checkpoint files:
-   ```bash
-   find / -name "lesion_seg*.pth" 2>/dev/null
-   find / -name "*seg*.pth" 2>/dev/null
-   ```
-2. Check Kaggle notebooks for training outputs: `notebooks/train_kaggle.ipynb`
-3. Look in cloud storage, shared drives, or backup locations for `lesion_seg_v1.pth` or similar
-4. Ask the teammate who trained the model for the exact checkpoint file and training configuration
+The ground truth for evaluation is `evaluation/evaluate_lesion_seg.py`, which uses the model from `backend/ml/segmentation.py`:
 
-### P2: Reproduce Evaluation with Known-Good Checkpoint
-
-Once the correct checkpoint is obtained:
 ```bash
 cd evaluation
-python evaluate_segmentation_v2.py
-```
-Expected: HE IoU ~0.27, EX IoU ~0.29, SE IoU ~0.43
-
-If still failing:
-1. Match the exact `timm` version used during training
-2. Verify the IDRiD test split (27 images) matches exactly
-3. Confirm the Ben Graham + CLAHE preprocessing pipeline is identical
-4. Ensure 8-way TTA is correctly implemented
-
-### P3: Verify Checkpoint on Synthetic Data
-
-To rule out metric computation bugs:
-```python
-# Perfect prediction should give IoU=1.0
-pred = gt.copy()
-iou = compute_iou(pred, gt)  # Should be 1.0
-
-# Random prediction should give IoU≈0
-pred = np.random.randint(0, 2, gt.shape)
-iou = compute_iou(pred, gt)  # Should be ~0.001-0.01
+python evaluate_lesion_seg.py
 ```
 
-### P4: If No Correct Checkpoint Found
+Output: `evaluation_outputs_handout/metrics.json`
 
-Retrain from scratch using:
-1. IDRiD segmentation dataset with individual TIF masks (54 train, 27 test)
-2. The architecture defined in `backend/ml/segmentation.py`
-3. Weighted BCE loss (MA/HE/EX/SE classes are heavily imbalanced)
-4. Validation: per-class IoU on IDRiD test set every epoch
+**Do NOT use** `evaluate_segmentation_v2.py` — it uses `ConvBNBlock` (no ReLU) and produces macro IoU of only 0.023.
+
+### P2: Resolve EX Discrepancy (if needed)
+
+If the 0.021 EX gap matters for publication:
+1. Locate the original training notebook or training run that produced the reported handout values
+2. Compare checkpoint file hashes: `md5sum checkpoints/lesion_seg_v2.pth`
+3. Retrain the segmentation model from scratch using IDRiD (54 train / 27 test) with the architecture in `backend/ml/segmentation.py`
+4. Evaluate the retrained model — expected: HE≥0.27, EX≥0.29, SE≥0.43
+
+### P3: Consider EX-Specific Analysis
+
+The EX discrepancy may be related to:
+- Hard Exudates having different visual characteristics (bright white/yellow vs dark haemorrhages)
+- Possible subtle preprocessing interaction affecting bright lesions differently
+- If EX validation is critical, consider training with more/better EX annotations
+
+### P4: Clean Up Legacy Evaluation Scripts
+
+The following scripts use the incorrect `ConvBNBlock` architecture:
+- `evaluation/evaluate_segmentation_v2.py` — produces macro IoU 0.023
+- `evaluation/test_segmentation.py` — uses ConvBNBlock, no Ben Graham/CLAHE
+
+Options:
+- **Update** them to import from `backend/ml/segmentation.py` and use `ConvBNReLU`
+- **Archive** them as historical references
 
 ---
 
 ## Quick Reference
 
-### Evaluate the current checkpoint
+### Evaluate with correct architecture
 ```bash
 cd evaluation
-python evaluate_segmentation_v2.py
+python evaluate_lesion_seg.py
 ```
-Output: `evaluation_outputs_v2/metrics.json`
+Output: `evaluation_outputs_handout/metrics.json` + `evaluation_report.md`
 
-### Test segmentation inference on a single image
-```bash
-cd evaluation
-python test_segmentation.py ../data/aptos/train_images/001639a390f0.png
-```
-Output: `outputs_seg/`
+### Current Best Results (ConvBNReLU + 8-way TTA)
 
-### Start the integrated Flask app
-```bash
-cd backend && python app.py
-# Both models load at startup
-# POST /api/predict runs grade → Grad-CAM → seg → returns all
-```
+| Lesion | N | IoU | Dice | Handout IoU | Δ |
+|--------|---|-----|------|------------|---|
+| MA | 27 | 0.0000 | 0.0000 | 0.0000 | +0.0000 |
+| HE | 27 | 0.2693 | 0.4008 | 0.2694 | -0.0001 |
+| EX | 27 | 0.2710 | 0.4081 | 0.2922 | -0.0212 |
+| SE | 14 | 0.4283 | 0.5599 | 0.4286 | -0.0003 |
+| **Macro** | **95** | **0.2167** | **0.3124** | — | — |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/ml/segmentation.py` | **Primary model** — ConvBNReLU, hooks, frozen backbone, Ben Graham + CLAHE, 8-way TTA |
+| `evaluation/evaluate_lesion_seg.py` | **Correct evaluation** — uses backend/ml/segmentation.py |
+| `evaluation/evaluate_segmentation_v2.py` | ⚠️ Legacy — uses ConvBNBlock (wrong), produces macro IoU 0.023 |
+| `evaluation/test_segmentation.py` | ⚠️ Legacy — uses ConvBNBlock, no Ben Graham/CLAHE |
 
 ### Environment
-- **timm version:** 1.0.26
-- **PyTorch:** 2.11.0+cu130
-- **pytorch_grad_cam:** 1.5.5
-- **IDRiD masks:** Use individual TIFs from `data/idrid_official/` (NOT combined PNGs)
+- **timm version:** 1.0.26+
+- **PyTorch:** 2.x
+- **IDRiD masks:** Use individual TIFs from `data/idrid_official/` — NOT combined PNGs

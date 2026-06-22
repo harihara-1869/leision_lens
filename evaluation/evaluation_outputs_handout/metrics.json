@@ -1,0 +1,56 @@
+{
+  "config": {
+    "model": "backend/ml/segmentation.py (ConvBNReLU decoder, hook-based features)",
+    "checkpoint": "/home/harihara-1869/Animplays/B.E(RVCE)/2nd Year/4th Sem/Main EL/leison-lens/checkpoints/lesion_seg_v2.pth",
+    "preprocessing": "Ben Graham + CLAHE + ImageNet norm",
+    "tta": "8-way (4 rotations \u00d7 2 flips)",
+    "threshold": 0.5,
+    "ground_truth": "Individual TIF masks (official IDRiD)",
+    "resize": "512\u00d7512",
+    "device": "cuda"
+  },
+  "per_class": {
+    "MA": {
+      "n": 27,
+      "mean_iou": 0.0,
+      "mean_dice": 0.0,
+      "handout_iou": 0.0,
+      "handout_dice": 0.0,
+      "iou_diff": 0.0,
+      "dice_diff": 0.0
+    },
+    "HE": {
+      "n": 27,
+      "mean_iou": 0.26931,
+      "mean_dice": 0.400832,
+      "handout_iou": 0.2694,
+      "handout_dice": 0.3834,
+      "iou_diff": -9e-05,
+      "dice_diff": 0.017432
+    },
+    "EX": {
+      "n": 27,
+      "mean_iou": 0.271048,
+      "mean_dice": 0.408145,
+      "handout_iou": 0.2922,
+      "handout_dice": 0.4349,
+      "iou_diff": -0.021152,
+      "dice_diff": -0.026755
+    },
+    "SE": {
+      "n": 14,
+      "mean_iou": 0.428344,
+      "mean_dice": 0.559854,
+      "handout_iou": 0.4286,
+      "handout_dice": 0.5596,
+      "iou_diff": -0.000256,
+      "dice_diff": 0.000254
+    }
+  },
+  "macro": {
+    "iou": 0.2167,
+    "dice": 0.312425
+  },
+  "verdict": "\u2717 Handout Results Not Reproduced",
+  "evaluation_time_s": 8.1
+}

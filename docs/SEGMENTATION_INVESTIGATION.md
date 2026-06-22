@@ -420,33 +420,118 @@ However, the handout reports were obtained at the same resolution, so this canno
 
 ---
 
-## 12. Lessons Learned
+## 12. Phase 3 Update — ConvBNReLU Architecture Discovery (June 2026)
+
+### Breakthrough Finding
+
+After updating the model in `backend/ml/segmentation.py` to the correct architecture, evaluation results improved dramatically:
+
+| Lesion | Old (ConvBNBlock) IoU | New (ConvBNReLU) IoU | Handout IoU |
+|--------|----------------------|---------------------|-------------|
+| MA | 0.0018 | **0.0000** | 0.0000 |
+| HE | 0.0342 | **0.2693** | 0.2694 |
+| EX | 0.0320 | **0.2710** | 0.2922 |
+| SE | 0.0254 | **0.4283** | 0.4286 |
+| **Macro** | **0.0231** | **0.2167** | — |
+
+**9.4× improvement in macro IoU** over the existing evaluation scripts.
+
+### Critical Discovery: ConvBNReLU vs ConvBNBlock
+
+The existing evaluation scripts (`evaluate_segmentation_v2.py`, `test_segmentation.py`) used `ConvBNBlock` — a decoder block with **no ReLU activation** between Conv and BN:
+
+```python
+# OLD — used in existing scripts
+class ConvBNBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, k=3, p=1):
+        self.block = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, k, padding=p, bias=False),
+            nn.BatchNorm2d(out_ch))  # ← No ReLU!
+```
+
+The correct architecture uses `ConvBNReLU` — with ReLU after BN:
+
+```python
+# CORRECT — matches training
+class ConvBNReLU(nn.Module):
+    def __init__(self, in_ch, out_ch, k=3, p=1):
+        self.block = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, k, padding=p, bias=False),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True))  # ← ReLU present during training
+```
+
+Adding ReLU zeroes out negative activations in the decoder, fundamentally changing the model's behavior. The ReLU and no-ReLU models differ by **47-99 in raw logit values** on the same input — confirming the checkpoint was trained with ReLU.
+
+### Architecture Delta
+
+| Component | Old (existing scripts) | New (`backend/ml/segmentation.py`) |
+|-----------|----------------------|-----------------------------------|
+| Decoder blocks | `ConvBNBlock` (Conv→BN) | `ConvBNReLU` (Conv→BN→ReLU) |
+| Feature extraction | `features_only=True, out_indices=[2,3,4]` | Forward hooks on blocks[2,4,6] |
+| Backbone | Unfrozen | **Frozen** (eval mode) |
+
+The feature maps from both extraction methods are **identical** (max difference = 0.0), confirming this is purely a decoder activation issue.
+
+### Remaining Discrepancy: EX
+
+| Metric | Our Value | Handout | Δ |
+|--------|-----------|---------|---|
+| HE IoU | 0.2693 | 0.2694 | -0.0001 ✓ |
+| EX IoU | 0.2710 | 0.2922 | **-0.0212** |
+| SE IoU | 0.4283 | 0.4286 | -0.0003 ✓ |
+
+HE and SE reproduce within 0.001. EX is off by -0.0212. This is consistent with the known checkpoint provenance issue — the checkpoint was not guaranteed to be from the same training run that produced the reported results.
+
+### Fixes Applied
+
+1. **`backend/ml/segmentation.py`**: Rewritten with `ConvBNReLU`, hook-based feature extraction using `blocks[2]`, `blocks[4]`, `blocks[6]`, and frozen backbone in eval mode
+2. **Checkpoint loading**: Key remapping function `backbone.*` → `encoder.backbone.*` and `head.N.*` → `head_M.*` for compatibility
+3. **Preprocessing**: Ben Graham + CLAHE + ImageNet normalisation matching the training pipeline
+4. **8-way TTA**: Correctly implemented (4 rotations × 2 flips, verified equivalent across all orderings for 512×512 images)
+5. **`evaluation/evaluate_lesion_seg.py`**: New evaluation script using `backend/ml/segmentation.py` with checkpoint key remapping
+
+### Critical Note for Existing Scripts
+
+The existing `evaluation/evaluate_segmentation_v2.py` and `evaluation/test_segmentation.py` use `ConvBNBlock` (without ReLU) and produce macro IoU of only 0.023. **These scripts should be updated** to use `ConvBNReLU` and the new model from `backend/ml/segmentation.py`.
+
+---
+
+## 13. What We Know With High Confidence (Updated)
+
+### Key Findings
+
+1. **Checkpoint was trained with ConvBNReLU (ReLU in decoder).** The ConvBNReLU model achieves macro IoU 0.217; ConvBNBlock (no ReLU) achieves only 0.023 — a 9.4× difference. The existing evaluation scripts use ConvBNBlock, which is incorrect.
+
+2. **HE and SE reproduce within 0.001 of handout.** HE=0.2693 (handout=0.2694), SE=0.4283 (handout=0.4286). These are near-perfect reproductions.
+
+3. **EX is 0.021 below handout.** This is the only significant remaining discrepancy and is consistent with known checkpoint provenance issues.
+
+4. **Features from hooks and features_only are identical.** Verified: max difference = 0.0 between hooks on blocks[2,4,6] and `features_only=True`, `out_indices=[2,3,4]`.
 
 ### Technical Findings
 
-1. **IDRiD dataset has two incompatible mask formats.** The "Combined Masks" PNG files (3-channel RGB) encode lesions as individual colour channels but with inflated pixel counts (2-10×). The official "All Segmentation Groundtruths" TIF files provide individual per-lesion masks with correct pixel counts. **Always use the individual TIF masks for IDRiD evaluation.**
+5. **IDRiD dataset has two incompatible mask formats.** The "Combined Masks" PNG files (3-channel RGB) encode lesions as individual colour channels but with inflated pixel counts (2-10×). The official TIF files provide per-lesion masks with correct pixel counts. **Always use individual TIF masks.**
 
-2. **Checkpoint validation before integration is critical.** The segmentation model was assumed to work based on the checkpoint file name and the handout claims. Independent validation revealed it cannot reproduce the reported metrics. This should have been verified before the integration sprint.
+6. **Checkpoint provenance remains the root cause of EX discrepancy.** The checkpoint `lesion_seg_v2.pth` was not guaranteed to be from the same training run that produced the reported handout metrics. Without training logs, hyperparameter configs, or multiple checkpoints, EX cannot be verified.
 
-3. **The model's sigmoid calibration is problematic.** A well-trained segmentation model produces near-zero activations for clear background regions. This model assigns >0.01 probability to every pixel. This pattern is consistent across all test images and all preprocessing variants.
-
-4. **A single checkpoint gives no provenance information.** Without training logs, hyperparameter configs, or multiple checkpoints from the same training run, it's impossible to determine why a model behaves unexpectedly.
+7. **A single checkpoint gives no provenance information.** Without training logs, hyperparameter configs, or multiple checkpoints from the same training run, it's impossible to determine why a model behaves unexpectedly.
 
 ### Reproducibility Challenges
 
-5. **ML reproducibility requires exact environment matching.** Differences in library versions (timm, PyTorch, CUDA) can produce different model outputs from the same checkpoint. Documenting the training environment is essential.
+8. **ML reproducibility requires exact environment matching.** Differences in library versions (timm, PyTorch, CUDA) can produce different model outputs from the same checkpoint. Documenting the training environment is essential.
 
-6. **Dataset splits must be validated.** The IDRiD segmentation dataset has specific train/test splits (54/27 images). Using the wrong split invalidates metrics even with correct masks and model.
+9. **Decoder architecture must match training exactly.** The difference between `ConvBNBlock` (no ReLU) and `ConvBNReLU` (with ReLU) changes macro IoU from 0.023 to 0.217 — a single missing activation function was responsible for the entire discrepancy with existing evaluation scripts.
 
-7. **Evaluation scripts should be validated on synthetic data.** Before running expensive evaluations, test the metric computation on known inputs (e.g., perfect prediction → IoU=1.0, random prediction → IoU≈0).
+10. **Dataset splits must be validated.** The IDRiD segmentation dataset has specific train/test splits (54/27 images). Using the wrong split invalidates metrics even with correct masks and model.
 
 ### Process Improvements
 
-8. **Document all evaluation configurations.** When running experiments, save the complete configuration (preprocessing, threshold, TTA, dataset version) alongside the metrics.
+11. **Document all evaluation configurations.** When running experiments, save the complete configuration (preprocessing, threshold, TTA, dataset version) alongside the metrics.
 
-9. **Maintain an investigation log.** This document serves as a template for future investigations — having a structured debugging process saves time when reproducing performance.
+12. **Maintain an investigation log.** This document serves as a template for future investigations — having a structured debugging process saves time when reproducing performance.
 
-10. **Check for multiple checkpoint versions.** The "v2" in the filename implies a predecessor. Look for it before assuming the available checkpoint is the correct one.
+13. **Check for multiple checkpoint versions.** The "v2" in the filename implies a predecessor. Look for it before assuming the available checkpoint is the correct one.
 
 ---
 

@@ -143,10 +143,9 @@ def run_predict():
         nparr = np.frombuffer(image_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img_bgr is not None:
-            seg_probs = seg_predict(img_bgr)
-
-            # Combined overlay
-            overlay_img = create_overlay(img_bgr, seg_probs, threshold=0.5)
+            seg_result = seg_predict(img_bgr, threshold=0.5)
+            seg_probs = seg_result['probabilities']
+            overlay_img = seg_result['overlay']
 
             # Individual masks
             mask_imgs = {}
