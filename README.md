@@ -1,6 +1,6 @@
 # Leison Lens — Multi-Task Diabetic Retinopathy Detection
 
-> **Status:** Phase 3 complete (Training + Ablation) · Phase 4 in progress (Grad-CAM) · Phase 6 complete (Flask + React deployment)
+> **Status:** Phase 3 complete (Training + Ablation) · Phase 4 complete (Grad-CAM in production) · Phase 6 complete (Flask + React + SQLite deployment) · Segmentation model integrated (visualisation only)
 > **Target venue:** IEEE Journal of Biomedical and Health Informatics (JBHI) or equivalent
 
 ## Quick Start
@@ -15,10 +15,11 @@ pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 
 # 3. Environment
-cp .env.example .env   # Fill in your Supabase credentials + secrets
+cp .env.example .env   # Fill in your secrets (DATABASE_URL defaults to local SQLite)
 
-# 4. Model checkpoint
+# 4. Model checkpoints
 # Download from Kaggle and place at: checkpoints/best_model_lambda0.4.pth
+# Place segmentation model at: checkpoints/lesion_seg_v2.pth (if available)
 
 # 5. Run everything
 ./run.sh
@@ -26,7 +27,7 @@ cp .env.example .env   # Fill in your Supabase credentials + secrets
 
 > The frontend is at **http://localhost:5173**, backend at **http://localhost:5000**.
 > Press **Ctrl+C** to stop both servers simultaneously.
-> A demo account is coming soon — for now, sign up at `/signup` after starting the servers.
+> Sign up at `/signup` after starting the servers.
 
 ---
 
@@ -69,21 +70,26 @@ Leison Lens is a full-stack AI diagnostic platform for automated diabetic retino
 Fundus image (JPG/PNG/TIFF)
         │
         ▼
-Flask REST API (/api/predict)
-        │
-        ▼
 Preprocessing pipeline (Ben Graham + CLAHE)
         │
-        ▼
-EfficientNet-B4 Multi-Task Model
-        ├── DR Grade head   → grade 0–4 + confidence
-        └── Lesion head     → MA / HE / EX / SE probabilities
-        │
-        ▼
-Result stored in PostgreSQL (Supabase)
-        │
-        ▼
-React frontend (Leison Lens portal)
+        ├──────────────────────────────────┐
+        ▼                                  ▼
+EfficientNet-B4               EfficientNet-B4 + FPN
+Multi-Task Model              Segmentation Model
+  ├── DR Grade head              ├── MA probability map
+  │   → grade 0–4 + confidence   ├── HE probability map
+  └── Lesion head                ├── EX probability map
+      → MA / HE / EX / SE        └── SE probability map
+        │                                  │
+        ├── Grad-CAM heatmap               │
+        │                                  │
+        └──── Lesion segmentation overlay ◄┘
+                           │
+                           ▼
+              Result stored in SQLite (instance/app.db)
+                           │
+                           ▼
+              React frontend (Leison Lens portal)
 ```
 
 ---
@@ -116,7 +122,7 @@ Diabetic retinopathy is the leading cause of preventable blindness in working-ag
 ## 3. Repository Structure
 
 ```
-el4/
+leison-lens/
 ├── src/                         # ML training code (do not modify)
 │   ├── config.py                # All hyperparameters and paths
 │   ├── dataset.py               # APTOSDataset class, augmentations, DataLoader builder
@@ -132,15 +138,18 @@ el4/
 │   ├── app.py                   # Application factory (create_app)
 │   ├── config.py                # Reads .env variables
 │   ├── extensions.py            # Shared SQLAlchemy, JWT, CORS instances
+│   ├── migrate_add_columns.py   # DB migration script
 │   ├── ml/
-│   │   └── inference.py         # Self-contained model + preprocessing for inference
+│   │   ├── inference.py         # DR grading model + preprocessing
+│   │   └── segmentation.py      # Lesion segmentation (EfficientNet-B4 + FPN)
 │   ├── models/
 │   │   ├── user.py              # SQLAlchemy User model
 │   │   └── scan.py              # SQLAlchemy Scan model
 │   └── routes/
 │       ├── auth.py              # POST /api/auth/signup, POST /api/auth/login
-│       ├── predict.py           # POST /api/predict
-│       └── scans.py             # GET /api/scans/, GET /api/scans/<id>
+│       ├── predict.py           # POST /api/predict (grade + Grad-CAM + seg)
+│       ├── scans.py             # GET /api/scans/, GET /api/scans/<id>
+│       └── dashboard.py         # GET /api/dashboard
 │
 ├── frontend/                    # Vite + React + Tailwind clinical portal
 │   ├── src/
@@ -152,16 +161,16 @@ el4/
 │   │   │   │                    # PatientHistoryPage, AnalyticsPage, SettingsPage
 │   │   ├── components/          # GlassCard, Button, SeverityBadge, layout
 │   │   ├── mock/
-│   │   │   ├── mockDashboard.js # Dashboard mock (no backend endpoint yet)
-│   │   │   └── mockPatients.js  # Fallback patient data + DR_GRADE_LABELS constant
+│   │   │   └── mockPatients.js  # Display constants (SEVERITY_BADGE, etc.)
 │   │   └── hooks/
 │   │       └── useFileUpload.js # Drag-and-drop file hook
 │   ├── .env                     # VITE_API_URL=http://localhost:5000
-│   ├── vite.config.js           # Dev server + /api proxy to :5000
+│   ├── vite.config.js           # Dev server + /api + /static proxy
 │   └── package.json
 │
 ├── checkpoints/
-│   └── best_model_lambda0.4.pth # Primary model checkpoint (77 MB, not in git)
+│   ├── best_model_lambda0.4.pth # DR grading model (77 MB, not in git)
+│   └── lesion_seg_v2.pth        # Lesion segmentation model (75 MB, not in git)
 │
 ├── data/
 │   └── aptos/                   # APTOS 2019 images (not in git)
@@ -169,39 +178,33 @@ el4/
 │       ├── train.csv            # id_code, diagnosis columns
 │       └── test.csv
 │
-├── outputs/
-│   └── preprocessed/            # Ben Graham + CLAHE processed images (not in git)
-│       ├── train/               # 2928 images
-│       ├── val/                 # 367 images
-│       ├── test/                # 367 images
-│       ├── train_labels.csv
-│       ├── val_labels.csv
-│       ├── test_labels.csv
-│       └── class_weights.npy    # Inverse-frequency weights for WeightedRandomSampler
+├── evaluation/                  # Segmentation/Grad-CAM validation scripts
+│   ├── evaluate_segmentation_v2.py
+│   ├── test_segmentation.py
+│   └── test_gradcam.py
+│
+├── instance/                    # Runtime data (gitignored)
+│   ├── app.db                   # SQLite database
+│   ├── uploads/                 # Uploaded fundus images
+│   ├── heatmaps/                # Grad-CAM overlays
+│   └── segmentations/           # Lesion segmentation overlays + masks
 │
 ├── logs/
-│   ├── ablation_results.json    # Full ablation study results (all λ values)
-│   ├── training_loss.png        # Train vs val loss curves
-│   └── val_kappa.png            # Validation QWK per epoch
+│   ├── ablation_results.json    # Ablation study results (all λ values)
+│   ├── training_loss.png
+│   └── val_kappa.png
 │
 ├── notebooks/
-│   └── train_kaggle.ipynb       # Kaggle notebook for T4 GPU training
+│   └── train_kaggle.ipynb       # Kaggle training notebook
 │
-├── .env                         # SECRET_KEY, JWT_SECRET_KEY, DATABASE_URL, CHECKPOINT_PATH
+├── docs/
+│   ├── SEGMENTATION_INVESTIGATION.md
+│   └── SEGMENTATION_NEXT_STEPS.md
+│
+├── .env                         # Secrets (not in git)
 ├── requirements.txt             # ML training dependencies
-├── run.sh                       # Start both backend + frontend (Ctrl+C to stop)
+├── run.sh                       # Start both servers
 └── README.md
-```
-
-**What is and is not in git:**
-
-| Included | Excluded (too large / sensitive) |
-|----------|----------------------------------|
-| All source code | `data/` (3.6 GB image dataset) |
-| Frontend | `outputs/preprocessed/` (preprocessed images) |
-| Backend | `checkpoints/*.pth` (77 MB model weights) |
-| Logs and results | `.env` (secrets) |
-| Notebooks | `venv/`, `node_modules/` |
 
 ---
 
@@ -297,6 +300,46 @@ total_loss = L_CrossEntropy(grade) + λ × L_BCE(lesion)
 The lesion detection task acts as a regulariser for the grade prediction task. Lesions are the clinical cause of grade severity — microaneurysms appear in grade 1, haemorrhages and exudates worsen in grades 2–3, neovascularisation defines grade 4. By forcing the shared backbone to explain both tasks simultaneously, it learns features that are clinically meaningful rather than spurious correlations.
 
 **The λ weight (0.4)** controls the relative contribution of the lesion loss. Too low (λ→0) degenerates to single-task grading. Too high risks optimising lesion detection at the expense of grading accuracy. See the ablation study for the full sensitivity analysis.
+
+### 4.6 Lesion Segmentation Model (Separate)
+
+A second model performs pixel-level segmentation of the same four lesion types (MA, HE, EX, SE) — complementing the grading model's binary presence predictions with spatial localisation information.
+
+**Architecture:** The model uses EfficientNet-B4 as a feature extractor (via `timm`, with `features_only=True` and `out_indices=[2, 3, 4]`), followed by a custom FPN-style decoder with lateral connections and progressive upsampling. The decoder fuses multi-scale features at strides 8, 16, and 32, producing a 4-channel logit map at full input resolution.
+
+**Parameters:** 17.9 million total (shared backbone weights are separate from the grading model — these are independent checkpoints).
+
+**Pipeline role:** Given an input fundus image at 512×512 pixels:
+
+```
+EfficientNet-B4 (features_only)
+  ├── blocks.2  → 56 ch, stride 8   → lateral → top-down refinement → upsampling
+  ├── blocks.4  → 160 ch, stride 16  → lateral → top-down refinement → upsampling
+  └── blocks.6  → 448 ch, stride 32  → lateral → (deepest level, no refinement)
+                                              ↓
+                              FPN decoder + 3× bilinear upsampling
+                                              ↓
+                              4-channel logits [MA, HE, EX, SE]
+                                              ↓
+                              Sigmoid → per-pixel probabilities at 512×512
+```
+
+**Training data:** The IDRiD dataset (81 fundus images with pixel-level segmentation masks for all four lesion types). The dataset is split into 54 training and 27 test images. Lesion presence is heavily imbalanced — lesion pixels typically cover 0.02–4 % of the image area, depending on the class.
+
+**Loss function:** Weighted binary cross-entropy at the pixel level, applied independently per channel. Class weights compensate for the extreme pixel-level imbalance.
+
+**Class mapping:**
+
+| Channel | Lesion | Abbreviation |
+|---------|--------|-------------|
+| 0 | Microaneurysms | MA |
+| 1 | Haemorrhages | HE |
+| 2 | Hard Exudates | EX |
+| 3 | Soft Exudates | SE |
+
+**Benchmark status:** The checkpoint (`lesion_seg_v2.pth`, 75 MB) loads and produces visually plausible overlays, but the reported quantitative performance (per-class IoU of HE=0.269, EX=0.292, SE=0.429 on the IDRiD test set) has not been independently reproduced. Current measurements yield a macro IoU of approximately 0.023. The discrepancy is under investigation; the most likely explanation is a checkpoint provenance issue (the available checkpoint may not match the training run that produced the reported results). A detailed investigation archive is available at `docs/SEGMENTATION_INVESTIGATION.md`.
+
+**Relationship to the grading model:** The segmentation model is architecturally independent of the multi-task grading model (different weights, different decoder). Both share the same backbone architecture (EfficientNet-B4), but they are loaded as separate models with separate checkpoints. The grading model's lesion head predicts binary presence probabilities (a single scalar per lesion type per image), while the segmentation model predicts a full probability map at pixel resolution. These two predictions are complementary — the grading model provides a grade-level assessment, and the segmentation model provides spatial localisation of the lesions that inform the grade.
 
 ---
 
@@ -567,9 +610,10 @@ Frontend (Vite + React + Tailwind CSS)    Backend (Flask + SQLAlchemy)
            │   POST /api/predict (multipart)          │
            │   GET  /api/scans/                       │
            │   GET  /api/scans/:id                    │
+           │   GET  /api/dashboard                    │
            └──────────────────────────────────────────┘
                                                       │
-                                            PostgreSQL (Supabase)
+                                            SQLite (instance/app.db)
                                             users table + scans table
 ```
 
@@ -590,7 +634,7 @@ Frontend (Vite + React + Tailwind CSS)    Backend (Flask + SQLAlchemy)
 ### 10.3 Prediction Flow
 
 1. Clinician uploads a fundus image on `/scan/new`
-2. Frontend sends `POST /api/predict` with `multipart/form-data` (image + optional patient name/age) and a `Bearer` JWT token
+2. Frontend sends `POST /api/predict` with `multipart/form-data` (image + optional patient name) and a `Bearer` JWT token
 3. Flask backend:
    a. Verifies the JWT token
    b. Reads the image bytes
@@ -598,18 +642,21 @@ Frontend (Vite + React + Tailwind CSS)    Backend (Flask + SQLAlchemy)
    d. Runs forward pass through `DRMultiTaskModel`
    e. Applies softmax to grade logits → 5 grade probabilities
    f. Applies sigmoid to lesion logits → 4 lesion probabilities
-   g. Stores result in the `scans` PostgreSQL table
-   h. Returns JSON with grade, confidence, all grade probabilities, lesion probabilities, scan ID
-4. Frontend shows the DR grade, confidence, and lesion probabilities
+   g. Saves the original uploaded image to `instance/uploads/scan_{id}.png`
+   h. Generates Grad-CAM heatmap → saves to `instance/heatmaps/scan_{id}.png`
+   i. Runs lesion segmentation overlay → saves to `instance/segmentations/scan_{id}_overlay.png` + per-lesion masks
+   j. Stores result in the `scans` SQLite table
+   k. Returns JSON with grade, confidence, lesion probabilities, all image URLs
+4. Frontend shows the DR grade, Grad-CAM heatmap, and lesion segmentation overlay
 5. Clinician clicks through to `/scan/:id/results` for full detail view
 
 ---
 
 ## 11. Data Storage
 
-### 11.1 PostgreSQL Schema (Supabase)
+### 11.1 SQLite Schema
 
-The backend uses PostgreSQL hosted on Supabase. Two tables are created automatically on first startup via `db.create_all()`.
+The backend uses SQLite stored at `instance/app.db`. Two tables are created automatically on first startup via `db.create_all()`.
 
 **`users` table:**
 
@@ -639,21 +686,30 @@ The backend uses PostgreSQL hosted on Supabase. Two tables are created automatic
 | `prob_he` | FLOAT | Sigmoid probability of HE presence (0–1) |
 | `prob_ex` | FLOAT | Sigmoid probability of EX presence (0–1) |
 | `prob_se` | FLOAT | Sigmoid probability of SE presence (0–1) |
-| `heatmap_path` | VARCHAR(512) | Nullable — reserved for Phase 4 Grad-CAM |
+| `heatmap_path` | VARCHAR(512) | Grad-CAM heatmap URL or null |
+| `original_image_path` | VARCHAR(512) | Original uploaded image URL or null |
+| `seg_overlay_url` | VARCHAR(512) | Segmentation overlay URL or null |
+| `seg_masks_json` | TEXT | JSON string of per-lesion mask URLs or null |
 
 **Access control:** Each scan is owned by a user (`user_id` FK). The `/api/scans/` and `/api/scans/:id` endpoints only return scans belonging to the authenticated user (`get_jwt_identity()` is checked on every request).
 
 ### 11.2 Authentication
 
-JSON Web Tokens (JWT) are used for stateless authentication. Flask-JWT-Extended issues tokens on login/signup; the frontend stores them in `localStorage` under key `token`. Every authenticated request sends `Authorization: Bearer <token>` in the HTTP header.
+JSON Web Tokens (JWT) are used for stateless authentication. Flask-JWT-Extended issues tokens with a 2-hour expiry on login/signup; the frontend stores them in `localStorage` under key `token`. Every authenticated request sends `Authorization: Bearer <token>` in the HTTP header.
 
 Passwords are hashed using Werkzeug's `generate_password_hash` (PBKDF2-SHA256 with salt). Plaintext passwords are never stored.
 
 ### 11.3 Image Storage
 
-Images are **not stored** on the server. Only the model's numerical output (grade, confidence, lesion probabilities) is persisted in PostgreSQL. The uploaded image is held in memory only for the duration of the prediction request and then discarded.
+All generated images are stored locally under `instance/`:
 
-This is intentional for Phase 5 of the project. For clinical deployment, images would be stored in a HIPAA-compliant object store (e.g., AWS S3 with server-side encryption).
+| Directory | Contents |
+|-----------|----------|
+| `instance/uploads/` | Original uploaded fundus image |
+| `instance/heatmaps/` | Grad-CAM heatmap overlay (512×512 PNG) |
+| `instance/segmentations/` | Lesion segmentation overlay + per-lesion masks (MA, HE, EX, SE) |
+
+Flask serves these via `static_folder=instance_dir, static_url_path='/static'`, making them available at `/static/uploads/scan_{id}.png`, etc. The Vite dev server proxies `/static` requests to Flask so the frontend can load them without CORS issues.
 
 ---
 
@@ -715,7 +771,16 @@ Run model inference on a fundus image. **Requires JWT.**
     "EX": 0.44,
     "SE": 0.12
   },
-  "scan_id": 7
+  "scan_id": 7,
+  "original_url": "/static/uploads/scan_7.png",
+  "heatmap_url": "/static/heatmaps/scan_7.png",
+  "seg_overlay_url": "/static/segmentations/scan_7_overlay.png",
+  "seg_masks": {
+    "MA": "/static/segmentations/scan_7_MA.png",
+    "HE": "/static/segmentations/scan_7_HE.png",
+    "EX": "/static/segmentations/scan_7_EX.png",
+    "SE": "/static/segmentations/scan_7_SE.png"
+  }
 }
 ```
 
@@ -737,24 +802,56 @@ Return a single scan by ID. Returns 404 if the scan doesn't belong to the authen
 
 ---
 
+### `GET /api/dashboard`
+
+Return computed stats and recent activity for the authenticated user. **Requires JWT.**
+
+**Response 200:**
+```json
+{
+  "stats": [
+    { "id": "total",    "label": "Total Scans",      "value": "42",    "color": "text-primary",   "accentColor": "bg-primary" },
+    { "id": "early",    "label": "Early Detections",  "value": "31",    "color": "text-tertiary",  "accentColor": "bg-tertiary" },
+    { "id": "accuracy", "label": "AI Accuracy",       "value": "96.8%", "color": "text-secondary", "accentColor": "bg-secondary" },
+    { "id": "backlog",  "label": "Backlog",           "value": "5",     "color": "text-error",     "accentColor": "bg-error" }
+  ],
+  "recent": [
+    {
+      "id": 7,
+      "initials": "PS",
+      "name": "Priya Sharma",
+      "patientId": "PT-000007",
+      "scanDate": "22 Jun 2026",
+      "drDotColor": "bg-warning",
+      "drGradeColor": "text-warning",
+      "drGradeLabel": "Moderate DR",
+      "confidence": "94.2%"
+    }
+  ]
+}
+```
+
+---
+
 ## 13. Setup & Running
 
 ### 13.1 Prerequisites
 
 - Python 3.10+
 - Node.js 18+
-- Access to a PostgreSQL database (Supabase free tier works)
 - `checkpoints/best_model_lambda0.4.pth` (download separately — see below)
 
-### 13.2 Download Model Checkpoint
+### 13.2 Download Model Checkpoints
 
-The model checkpoint is 77 MB and excluded from git. Download from Kaggle:
+The grading model checkpoint (77 MB) is excluded from git. Download from Kaggle:
 
 ```
 https://kaggle.com/datasets/ff9e5ab2c38dcb3b603cc3fe6df9504c9e5363828f30cec6c0b0865a9017aaaa
 ```
 
 Place it at: `checkpoints/best_model_lambda0.4.pth`
+
+The segmentation model checkpoint (75 MB) should be placed at `checkpoints/lesion_seg_v2.pth` if available. The web app works without it (segmentation overlay is skipped).
 
 ### 13.3 Environment Variables
 
@@ -763,10 +860,13 @@ Create `.env` at the project root (copy and fill in your values):
 ```bash
 SECRET_KEY=your-flask-secret-key-min-32-chars
 JWT_SECRET_KEY=your-jwt-secret-key-min-32-chars-for-hs256
-DATABASE_URL=postgresql://user:password@host:5432/dbname
+DATABASE_URL=sqlite:///app.db
 CHECKPOINT_PATH=./checkpoints/best_model_lambda0.4.pth
+SEG_CHECKPOINT_PATH=./checkpoints/lesion_seg_v2.pth
 FRONTEND_URL=http://localhost:5173
 ```
+
+`DATABASE_URL` defaults to `sqlite:///app.db` (stored at `backend/instance/app.db`) if not set.
 
 ### 13.4 Backend Setup
 
@@ -774,12 +874,12 @@ FRONTEND_URL=http://localhost:5173
 # From project root — install backend dependencies
 pip install -r backend/requirements.txt
 
-# Start Flask (run as a module so package imports resolve correctly)
-python -m backend.app
+# Start Flask
+PYTHONPATH="$PWD" python backend/app.py
 ```
 
 On first startup, Flask will:
-1. Connect to PostgreSQL and create the `users` and `scans` tables if they don't exist
+1. Create SQLite database at `instance/app.db` and create tables if they don't exist
 2. Load the EfficientNet-B4 checkpoint into memory (takes ~5–15 seconds)
 3. Start serving on `http://localhost:5000`
 
@@ -791,7 +891,7 @@ npm install        # first time only
 npm run dev        # starts Vite on http://localhost:5173 (or :5174 if port busy)
 ```
 
-The `frontend/.env` sets `VITE_API_URL=http://localhost:5000` so the frontend calls Flask directly. The `vite.config.js` also has a `/api` proxy as a fallback.
+The `frontend/vite.config.js` proxies `/api` and `/static` requests to the Flask backend on port 5000.
 
 ### 13.6 ML Training (reproducing from scratch)
 
@@ -823,7 +923,7 @@ python -m src.train
 | 1 | Environment setup, dataset download, APTOS EDA | ✅ Complete |
 | 2 | Preprocessing pipeline: Ben Graham + CLAHE + fundus crop | ✅ Complete |
 | 3 | Multi-task model training + λ ablation study | ✅ Complete |
-| 4 | Grad-CAM validation on IDRiD pixel-level masks (IoU, Dice) | 🔄 In progress |
+| 4 | Grad-CAM validation on IDRiD pixel-level masks (IoU, Dice) | ✅ Complete |
 | 5 | Zero-shot cross-dataset evaluation on Messidor-2 | ⬜ Upcoming |
 | 6 | Flask REST API + React clinical portal (Leison Lens) | ✅ Complete |
 | 7 | Paper writing and journal submission | ⬜ Upcoming |
@@ -871,4 +971,4 @@ python -m src.train
 ---
 
 *Model trained on Kaggle free tier (NVIDIA T4 GPU, 16 GB VRAM). No paid compute used.*
-*Clinical portal built with Flask + React + Tailwind CSS + PostgreSQL (Supabase).*
+*Clinical portal built with Flask + React + Tailwind CSS + SQLite.*
