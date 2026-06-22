@@ -4,9 +4,9 @@
  * Full AI diagnostic output:
  *   1. Patient info header
  *   2. Side-by-side: original + Grad-CAM heatmap
- *   3. Lesion segmentation overlay with per-type toggles
+ *   3. Side-by-side: lesion overlay + probabilities
  *   4. DR Severity Scale
- *   5. Lesion Probabilities + AI Diagnostic Insight
+ *   5. AI Diagnostic Insight
  */
 
 import { useState, useEffect } from 'react'
@@ -14,7 +14,6 @@ import { useParams } from 'react-router-dom'
 import PortalLayout from '../components/layout/PortalLayout.jsx'
 import GlassCard from '../components/ui/GlassCard.jsx'
 import Icon from '../components/ui/Icon.jsx'
-import Button from '../components/ui/Button.jsx'
 import { getScanResults } from '../api/index.js'
 import { DR_GRADE_LABELS, LESION_DISPLAY } from '../mock/mockPatients.js'
 
@@ -119,62 +118,97 @@ export default function ResultsDetailPage() {
         </div>
       </div>
 
-      {/* ─── 3. Lesion Segmentation Overlay ──────────────────────────── */}
-      <GlassCard className="rounded-3xl p-6 md:p-8 mb-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
-            Lesion Segmentation
-          </h3>
-          <span className="font-mono text-[10px] text-on-surface-variant/40">
-            {activeCount}/4 visible
-          </span>
-        </div>
-
-        {/* Segmentation image */}
-        <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-80 mb-6">
-          <img
-            src={result.segOverlayUrl}
-            alt="Lesion segmentation overlay"
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-          />
-          <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
-            <span className="font-mono text-[10px] text-white uppercase tracking-widest">
-              Lesion Overlay
+      {/* ─── 3. Lesion Segmentation + Probabilities ─────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* Lesion Overlay image */}
+        <GlassCard className="rounded-3xl p-6 md:p-8">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
+              Lesion Segmentation
+            </h3>
+            <span className="font-mono text-[10px] text-on-surface-variant/40">
+              {activeCount}/4 visible
             </span>
           </div>
-        </div>
 
-        {/* Per-lesion toggle pills */}
-        <div className="flex flex-wrap gap-3 justify-center">
-          {Object.entries(LESION_DISPLAY).map(([key, meta]) => {
-            const isActive = activeSegLesions[key]
-            return (
-              <button
-                key={key}
-                onClick={() => toggleLesion(key)}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-full font-mono text-xs
-                  transition-all duration-200 border-2
-                  ${isActive
-                    ? 'bg-white/90 text-on-surface shadow-md border-transparent'
-                    : 'bg-white/20 text-on-surface-variant/50 border-outline-variant/30'
-                  }
-                `}
-              >
-                {/* Colour dot */}
-                <span
-                  className={`w-2.5 h-2.5 rounded-full transition-opacity ${
-                    isActive ? 'opacity-100' : 'opacity-30'
-                  }`}
-                  style={{ backgroundColor: meta.color }}
-                />
-                <span>{meta.short}</span>
-                <span className="text-on-surface-variant/60">{meta.full}</span>
-              </button>
-            )
-          })}
-        </div>
-      </GlassCard>
+          <div className="glass bg-surface/40 rounded-3xl overflow-hidden relative group h-64 md:h-96 mb-6">
+            <img
+              src={result.segOverlayUrl}
+              alt="Lesion segmentation overlay"
+              className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-700"
+            />
+            <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
+              <span className="font-mono text-[10px] text-white uppercase tracking-widest">
+                Lesion Overlay
+              </span>
+            </div>
+          </div>
+
+          {/* Per-lesion toggle pills */}
+          <div className="flex flex-wrap gap-3 justify-center">
+            {Object.entries(LESION_DISPLAY).map(([key, meta]) => {
+              const isActive = activeSegLesions[key]
+              return (
+                <button
+                  key={key}
+                  onClick={() => toggleLesion(key)}
+                  className={`
+                    flex items-center gap-2 px-4 py-2 rounded-full font-mono text-xs
+                    transition-all duration-200 border-2
+                    ${isActive
+                      ? 'bg-white/90 text-on-surface shadow-md border-transparent'
+                      : 'bg-white/20 text-on-surface-variant/50 border-outline-variant/30'
+                    }
+                  `}
+                >
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full transition-opacity ${
+                      isActive ? 'opacity-100' : 'opacity-30'
+                    }`}
+                    style={{ backgroundColor: meta.color }}
+                  />
+                  <span>{meta.short}</span>
+                  <span className="text-on-surface-variant/60">{meta.full}</span>
+                </button>
+              )
+            })}
+          </div>
+        </GlassCard>
+
+        {/* Lesion Probabilities (moved next to overlay) */}
+        <GlassCard className="rounded-3xl p-6 md:p-8 flex flex-col">
+          <div className="flex justify-between items-end mb-8">
+            <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
+              Lesion Probabilities
+            </h3>
+            <p className="font-bold text-xs text-primary">
+              Confidence: {result.confidence}%
+            </p>
+          </div>
+
+          <div className="space-y-6 flex-1 flex flex-col justify-center">
+            {Object.entries(result.lesionProbs).map(([key, pct]) => {
+              const meta = LESION_META[key]
+              return (
+                <div key={key}>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-xs font-bold text-on-surface">{meta.full}</span>
+                    <span className="font-mono text-xs">
+                      {String(pct).padStart(2, '0')}%
+                    </span>
+                  </div>
+                  <div className="h-1 w-full bg-outline-variant/20 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${meta.barColor} progress-animate rounded-full`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </GlassCard>
+      </div>
 
       {/* ─── 4. DR Severity Scale ───────────────────────────────────── */}
       <GlassCard className="rounded-3xl p-6 md:p-8 mb-6">
@@ -215,55 +249,18 @@ export default function ResultsDetailPage() {
         </div>
       </GlassCard>
 
-      {/* ─── 5. Lesion Probabilities + AI Insight ───────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Lesion probability bars */}
-        <GlassCard className="col-span-1 md:col-span-2 rounded-3xl p-6 md:p-8">
-          <div className="flex justify-between items-end mb-8">
-            <h3 className="font-mono text-[11px] text-on-surface-variant/60 uppercase tracking-[0.2em]">
-              Lesion Probabilities
-            </h3>
-            <p className="font-bold text-xs text-primary">
-              Confidence: {result.confidence}%
-            </p>
-          </div>
+      {/* ─── 5. AI Diagnostic Insight ───────────────────────────────── */}
+      <GlassCard className="rounded-3xl p-6 md:p-8 flex flex-col bg-primary/5 border border-primary/20">
+        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-sm">
+          <Icon name="neurology" className="text-primary text-2xl" />
+        </div>
 
-          <div className="space-y-6">
-            {Object.entries(result.lesionProbs).map(([key, pct]) => {
-              const meta = LESION_META[key]
-              return (
-                <div key={key}>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-xs font-bold text-on-surface">{meta.full}</span>
-                    <span className="font-mono text-xs">
-                      {String(pct).padStart(2, '0')}%
-                    </span>
-                  </div>
-                  <div className="h-1 w-full bg-outline-variant/20 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${meta.barColor} progress-animate rounded-full`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </GlassCard>
+        <h3 className="text-lg font-bold text-primary mb-4">Diagnostic Insight</h3>
 
-        {/* AI Diagnostic Insight */}
-        <GlassCard className="col-span-1 rounded-3xl p-6 md:p-8 flex flex-col bg-primary/5 border border-primary/20">
-          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center mb-6 shadow-sm">
-            <Icon name="neurology" className="text-primary text-2xl" />
-          </div>
-
-          <h3 className="text-lg font-bold text-primary mb-4">Diagnostic Insight</h3>
-
-          <p className="text-sm text-on-surface-variant leading-relaxed flex-1">
-            {result.aiInsight}
-          </p>
-        </GlassCard>
-      </div>
+        <p className="text-sm text-on-surface-variant leading-relaxed flex-1">
+          {result.aiInsight}
+        </p>
+      </GlassCard>
     </PortalLayout>
   )
 }
