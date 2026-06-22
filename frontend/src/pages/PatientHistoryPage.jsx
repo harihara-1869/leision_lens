@@ -64,11 +64,13 @@ export default function PatientHistoryPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoading(true)
-      getPatients({ search }).then(({ patients: list, total: count }) => {
-        setPatients(list)
-        setTotal(count)
-        setLoading(false)
-      })
+      getPatients({ search })
+        .then(({ patients: list, total: count }) => {
+          setPatients(list)
+          setTotal(count)
+          setLoading(false)
+        })
+        .catch(() => setLoading(false))
     }, 300) // 300ms debounce so we don't spam on every keystroke
     return () => clearTimeout(timer)
   }, [search])

@@ -1,5 +1,3 @@
-import { MOCK_PATIENTS } from '../mock/mockPatients.js'
-
 const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 const GRADE_DESCRIPTIONS = {
@@ -126,8 +124,8 @@ function scanToResultShape(scan) {
 // We run the full prediction in uploadScan and cache the result so
 // getScanResults can find it even though the page navigates to /scan/1/results.
 
-export async function uploadScan(file) {
-  const result = await predictScan(file, '', '')
+export async function uploadScan(file, patientName) {
+  const result = await predictScan(file, patientName, '')
   localStorage.setItem('last_scan_id', String(result.scan_id))
   return {
     scanId:      result.scan_id,
@@ -153,36 +151,26 @@ export async function getScanResults(scanId) {
 // shape. We fetch real scans and transform them.
 
 export async function getPatients({ search = '' } = {}) {
-  try {
-    const scans = await getScans()
-    const patients = scans
-      .filter((s) =>
-        !search ||
-        (s.patient_name || '').toLowerCase().includes(search.toLowerCase()),
-      )
-      .map((s) => ({
-        id:        s.id,
-        name:      s.patient_name || 'Unknown Patient',
-        patientId: 'PT-' + String(s.id).padStart(6, '0'),
-        scanDate:  s.uploaded_at
-          ? new Date(s.uploaded_at).toLocaleDateString('en-GB', {
-              day: '2-digit', month: 'short', year: 'numeric',
-            })
-          : '—',
-        drGrade:    s.grade,
-        confidence: parseFloat((s.confidence * 100).toFixed(1)),
-        previewUrl: null,
-      }))
-    return { patients, total: patients.length }
-  } catch (_) {
-    const filtered = MOCK_PATIENTS.filter(
-      (p) =>
-        !search ||
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.patientId.toLowerCase().includes(search.toLowerCase()),
+  const scans = await getScans()
+  const patients = scans
+    .filter((s) =>
+      !search ||
+      (s.patient_name || '').toLowerCase().includes(search.toLowerCase()),
     )
-    return { patients: filtered, total: 1284 }
-  }
+    .map((s) => ({
+      id:        s.id,
+      name:      s.patient_name || 'Unknown Patient',
+      patientId: 'PT-' + String(s.id).padStart(6, '0'),
+      scanDate:  s.uploaded_at
+        ? new Date(s.uploaded_at).toLocaleDateString('en-GB', {
+            day: '2-digit', month: 'short', year: 'numeric',
+          })
+        : '—',
+      drGrade:    s.grade,
+      confidence: parseFloat((s.confidence * 100).toFixed(1)),
+      previewUrl: s.original_image_path,
+    }))
+  return { patients, total: patients.length }
 }
 
 // ─── Dashboard — wired to /api/dashboard ───────────────────────────────────

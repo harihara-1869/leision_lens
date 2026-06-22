@@ -65,6 +65,7 @@ export default function NewScanPage() {
   const [analysisState, setAnalysisState] = useState(STATE.IDLE)
   const [scanError, setScanError]         = useState(null)
   const [prediction, setPrediction]       = useState(null)
+  const [patientName, setPatientName]     = useState('')
 
   // The displayed eye image — user's upload preview or default
   const eyeImage = previewUrl ?? DEFAULT_EYE_IMG
@@ -78,7 +79,7 @@ export default function NewScanPage() {
 
     try {
       setAnalysisState(STATE.UPLOADING)
-      const { scanId, confidence, grade_label } = await uploadScan(file)
+      const { scanId, confidence, grade_label } = await uploadScan(file, patientName)
       setPrediction({ confidence, grade_label })
 
       setAnalysisState(STATE.ANALYZING)
@@ -186,6 +187,20 @@ export default function NewScanPage() {
             {fileError && (
               <p className="text-error text-sm bg-error-container px-4 py-3 rounded-xl">{fileError}</p>
             )}
+
+            {/* Patient name input */}
+            <div className="w-full">
+              <label className="font-mono text-[10px] text-on-surface-variant uppercase tracking-widest mb-1.5 block pl-1">
+                Patient Name (optional)
+              </label>
+              <input
+                type="text"
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                placeholder="e.g. Priya Sharma"
+                className="w-full bg-white/40 border border-outline-variant focus:border-primary focus:ring-0 rounded-xl px-4 py-3 text-on-surface text-sm placeholder:text-outline/60 transition-colors"
+              />
+            </div>
 
             {/* Metadata pills: latency + encryption */}
             {/* <div className="grid grid-cols-2 gap-4">
