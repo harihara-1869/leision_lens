@@ -242,13 +242,39 @@ def _tta_inference(model: nn.Module, tensor: torch.Tensor) -> torch.Tensor:
 
 _model: LesionSegmentationModel | None = None
 
+# Key remapping from old checkpoint format to new model.
+# Checkpoint trained with backbone.* and head.N.* keys,
+# model uses encoder.backbone.* and head_M.* keys.
+_HEAD_REMAP = {
+    'head.0.': 'head_1.',
+    'head.2.': 'head_2.',
+    'head.4.': 'head_3.',
+    'head.6.': 'head_out.',
+}
+
+
+def _remap_ckpt_key(key: str) -> str:
+    """Remap old checkpoint key to new model key."""
+    if key.startswith('backbone.'):
+        return 'encoder.' + key
+    for old_pfx, new_pfx in _HEAD_REMAP.items():
+        if key.startswith(old_pfx):
+            return key.replace(old_pfx, new_pfx, 1)
+    return key  # lat_*, td_* keys unchanged
+
 
 def init_model(checkpoint_path: str):
-    """Load checkpoint and initialise the segmentation model singleton."""
+    """Load checkpoint and initialise the segmentation model singleton.
+
+    Handles key remapping from the old checkpoint format
+    (``backbone.*``, ``head.N.*``) to the new model's
+    (``encoder.backbone.*``, ``head_M.*``).
+    """
     global _model
     _model = LesionSegmentationModel().to(DEVICE)
     ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
-    _model.load_state_dict(ckpt, strict=False)
+    remapped = {_remap_ckpt_key(k): v for k, v in ckpt.items()}
+    _model.load_state_dict(remapped, strict=False)
     _model.eval()
     print(f'[seg] Model loaded from {checkpoint_path} on {DEVICE}')
 
