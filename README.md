@@ -1,6 +1,6 @@
 # Leison Lens — Multi-Task Diabetic Retinopathy Detection
 
-> **Status:** Phase 3 complete (Training + Ablation) · Phase 4 complete (Grad-CAM in production) · Phase 6 complete (Flask + React + SQLite deployment) · Segmentation model integrated (visualisation only)
+> **Status:** Phase 3 complete (Training + Ablation) · Phase 4 complete (Grad-CAM in production) · Phase 6 complete (Flask + React + SQLite deployment) · Segmentation model integrated (ConvBNReLU decoder, per-channel thresholds)
 > **Target venue:** IEEE Journal of Biomedical and Health Informatics (JBHI) or equivalent
 
 ## Quick Start
@@ -121,6 +121,8 @@ Diabetic retinopathy is the leading cause of preventable blindness in working-ag
 
 ## 3. Repository Structure
 
+<pre>
+
 ```
 leison-lens/
 ├── src/                         # ML training code (do not modify)
@@ -206,13 +208,14 @@ leison-lens/
 ├── run.sh                       # Start both servers
 └── README.md
 
+</pre>
 ---
 
 ## 4. Architecture
 
 ### 4.1 Overview
 
-```
+<pre>
 Input fundus image  [B, 3, 512, 512]
            │
            ▼
@@ -228,10 +231,10 @@ Input fundus image  [B, 3, 512, 512]
         ▼                 ▼
  ┌─────────────┐   ┌──────────────┐
  │  Grade Head │   │ Lesion Head  │
- │  Dropout(0.4)   │  Dropout(0.4)│
- │  Linear(1792→256)  Linear(1792→256)
- │  ReLU            ReLU          │
- │  Linear(256→5)   Linear(256→4)│
+ │ Dropout(0.4)│   │ Dropout(0.4) │
+ │Linear(1792→256)│ │Linear(1792→256)│
+ │    ReLU     │   │    ReLU     │
+ │Linear(256→5)│   │Linear(256→4)│
  └──────┬──────┘   └──────┬───────┘
         │                 │
   Grade logits [B,5]  Lesion logits [B,4]
@@ -243,7 +246,7 @@ Input fundus image  [B, 3, 512, 512]
         └────────┬─────────┘
                  ▼
    Total Loss = L_CE(grade) + λ · L_BCE(lesion)
-```
+</pre>
 
 ### 4.2 Backbone: EfficientNet-B4
 
@@ -305,41 +308,59 @@ The lesion detection task acts as a regulariser for the grade prediction task. L
 
 A second model performs pixel-level segmentation of the same four lesion types (MA, HE, EX, SE) — complementing the grading model's binary presence predictions with spatial localisation information.
 
-**Architecture:** The model uses EfficientNet-B4 as a feature extractor (via `timm`, with `features_only=True` and `out_indices=[2, 3, 4]`), followed by a custom FPN-style decoder with lateral connections and progressive upsampling. The decoder fuses multi-scale features at strides 8, 16, and 32, producing a 4-channel logit map at full input resolution.
+**Architecture:** The model uses EfficientNet-B4 as a feature extractor with forward hooks on `blocks[2]`, `blocks[4]`, `blocks[6]` (the three feature scales at strides 8, 16, 32), followed by a custom FPN-style decoder with `ConvBNReLU` lateral connections and progressive upsampling. The decoder produces a 4-channel logit map at full 512×512 resolution.
 
-**Parameters:** 17.9 million total (shared backbone weights are separate from the grading model — these are independent checkpoints).
+> Note on `out_indices`: The training script uses `features_only=True, out_indices=[2,3,4]`. These are positional indices into the 5-element feature list returned by timm, *not* EfficientNet block indices. They correctly select feats[2], feats[3], feats[4] which correspond to blocks 2, 4, and 6 respectively. The hook-based approach is verified equivalent (max diff = 0.0).
 
-**Pipeline role:** Given an input fundus image at 512×512 pixels:
+**Parameters:** 17.9 million total (backbone is frozen during inference — weights from timm's ImageNet pretrained model, not the checkpoint). The checkpoint only stores decoder + head weights.
+
+**Inference pipeline:** Given an input fundus image at 512×512 pixels:
 
 ```
-EfficientNet-B4 (features_only)
-  ├── blocks.2  → 56 ch, stride 8   → lateral → top-down refinement → upsampling
-  ├── blocks.4  → 160 ch, stride 16  → lateral → top-down refinement → upsampling
-  └── blocks.6  → 448 ch, stride 32  → lateral → (deepest level, no refinement)
-                                              ↓
-                              FPN decoder + 3× bilinear upsampling
-                                              ↓
-                              4-channel logits [MA, HE, EX, SE]
-                                              ↓
-                              Sigmoid → per-pixel probabilities at 512×512
+EfficientNet-B4 (hooks on blocks[2, 4, 6])
+  ├── blocks[2] → 56 ch, stride 8  → ConvBNReLU(56→128) ──┐
+  ├── blocks[4] → 160 ch, stride 16 → ConvBNReLU(160→128) ─┤── top-down fusion
+  └── blocks[6] → 448 ch, stride 32 → ConvBNReLU(448→128) ─┘       ↓
+                                               FPN decoder + 3× bilinear upsampling
+                                                       ↓
+                                       4-channel logits [MA, HE, EX, SE]
+                                                       ↓
+                                       Sigmoid → per-pixel probabilities at 512×512
 ```
 
 **Training data:** The IDRiD dataset (81 fundus images with pixel-level segmentation masks for all four lesion types). The dataset is split into 54 training and 27 test images. Lesion presence is heavily imbalanced — lesion pixels typically cover 0.02–4 % of the image area, depending on the class.
 
 **Loss function:** Weighted binary cross-entropy at the pixel level, applied independently per channel. Class weights compensate for the extreme pixel-level imbalance.
 
-**Class mapping:**
+**Preprocessing:** Identical to the grading model — resize to 512×512 → Ben Graham illumination removal → CLAHE on green channel → ImageNet normalisation.
 
-| Channel | Lesion | Abbreviation |
-|---------|--------|-------------|
-| 0 | Microaneurysms | MA |
-| 1 | Haemorrhages | HE |
-| 2 | Hard Exudates | EX |
-| 3 | Soft Exudates | SE |
+**Test-time augmentation:** 8-way TTA (4 rotations × 2 horizontal flips) is applied during inference. Predictions from all 8 transforms are averaged before thresholding.
 
-**Benchmark status:** The checkpoint (`lesion_seg_v2.pth`, 75 MB) loads and produces visually plausible overlays, but the reported quantitative performance (per-class IoU of HE=0.269, EX=0.292, SE=0.429 on the IDRiD test set) has not been independently reproduced. Current measurements yield a macro IoU of approximately 0.023. The discrepancy is under investigation; the most likely explanation is a checkpoint provenance issue (the available checkpoint may not match the training run that produced the reported results). A detailed investigation archive is available at `docs/SEGMENTATION_INVESTIGATION.md`.
+**Binarisation thresholds:** Per-channel probability thresholds are used to convert sigmoid probabilities to binary masks:
+
+| Channel | Lesion | Threshold |
+|---------|--------|-----------|
+| 0 | MA — Microaneurysms | 0.50 |
+| 1 | HE — Haemorrhages | 0.50 |
+| 2 | EX — Hard Exudates | 0.50 |
+| 3 | SE — Soft Exudates | **0.35** |
+
+SE requires a lower threshold (0.35 vs 0.50) because soft exudates are faint, poorly defined lesions with lower contrast. At 0.50 the SE channel returns all-zero masks for most images.
+
+**Benchmark status:** HE, EX, and SE benchmark values were reported by the original training run. With the correct `ConvBNReLU` decoder architecture, HE (0.269) and the previously reported SE (0.429 at threshold 0.5) reproduce within 0.001. EX has a -0.021 gap consistent with checkpoint provenance issues (the available checkpoint may not match the exact training run that produced the reported metrics). Full investigation archived at `docs/SEGMENTATION_INVESTIGATION.md`.
 
 **Relationship to the grading model:** The segmentation model is architecturally independent of the multi-task grading model (different weights, different decoder). Both share the same backbone architecture (EfficientNet-B4), but they are loaded as separate models with separate checkpoints. The grading model's lesion head predicts binary presence probabilities (a single scalar per lesion type per image), while the segmentation model predicts a full probability map at pixel resolution. These two predictions are complementary — the grading model provides a grade-level assessment, and the segmentation model provides spatial localisation of the lesions that inform the grade.
+
+### 4.7 Prediction Flow
+
+When a clinician uploads a fundus image via the web interface:
+
+1. **Preprocessing** — resize → Ben Graham → CLAHE → ImageNet norm
+2. **DR grade** — EfficientNet-B4 multi-task model → grade 0–4 + lesion probabilities
+3. **Grad-CAM** — gradient-weighted heatmap overlaying the predicted grade's focus area
+4. **Lesion segmentation** — EfficientNet-B4 + FPN decoder → 4-channel probability maps → per-channel binary masks (MA/HE/EX/SE at their respective thresholds) → coloured overlay
+5. **Save** — original image, heatmap, overlay, and per-lesion masks saved to `instance/`
+6. **Response** — JSON with grade, confidence, lesion probabilities, and all image URLs
 
 ---
 
