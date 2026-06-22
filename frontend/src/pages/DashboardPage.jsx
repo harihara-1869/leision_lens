@@ -21,19 +21,23 @@ import PortalLayout from '../components/layout/PortalLayout.jsx'
 import GlassCard from '../components/ui/GlassCard.jsx'
 import Icon from '../components/ui/Icon.jsx'
 import Button from '../components/ui/Button.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { getDashboard } from '../api/index.js'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
 
   // Fetch dashboard data on mount
   useEffect(() => {
-    getDashboard().then((res) => {
-      setData(res)
-      setLoading(false)
-    })
+    getDashboard()
+      .then((res) => {
+        setData(res)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
   }, [])
 
   return (
@@ -43,7 +47,7 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-h1 font-bold text-on-surface">Clinician Overview</h2>
           <p className="text-on-surface-variant mt-1">
-            Welcome back, {data?.clinician?.name ?? 'Doctor'}. Here is your diagnostic summary for today.
+            Welcome back, {user?.name ?? 'Doctor'}. Here is your diagnostic summary for today.
           </p>
         </div>
         {/* Notification + search icon buttons */}
@@ -108,7 +112,7 @@ export default function DashboardPage() {
             ? Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="h-16 bg-white/30 rounded-xl animate-pulse" />
               ))
-            : data?.activity.map((item) => (
+            : data?.recent.map((item) => (
                 <div
                   key={item.id}
                   className="grid grid-cols-6 items-center p-4 rounded-xl hover:bg-white/40 transition-all duration-200 border border-transparent hover:border-white/50 gap-2"

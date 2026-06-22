@@ -21,7 +21,6 @@ import { Link, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import Button from '../ui/Button.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { MOCK_CLINICIAN } from '../../mock/mockDashboard.js'
 
 // Each nav item: icon, label, and the route it links to
 const NAV_ITEMS = [
@@ -37,8 +36,7 @@ export default function SideNav({ activePage }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
-  // Use authenticated user if available, fallback to mock for display
-  const clinician = user ?? MOCK_CLINICIAN
+  const clinician = user ?? { name: 'Clinician' }
 
   function handleLogout() {
     logout()

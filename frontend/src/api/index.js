@@ -1,5 +1,4 @@
 import { MOCK_PATIENTS } from '../mock/mockPatients.js'
-import { MOCK_STATS, MOCK_ACTIVITY, MOCK_CLINICIAN } from '../mock/mockDashboard.js'
 
 const BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
@@ -186,10 +185,13 @@ export async function getPatients({ search = '' } = {}) {
   }
 }
 
-// ─── Dashboard (mock — no backend endpoint) ───────────────────────────────────
+// ─── Dashboard — wired to /api/dashboard ───────────────────────────────────
 
 export async function getDashboard() {
-  return { stats: MOCK_STATS, activity: MOCK_ACTIVITY, clinician: MOCK_CLINICIAN }
+  const res = await fetch(`${BASE_URL}/api/dashboard`, {
+    headers: authHeader(),
+  })
+  return handleResponse(res)
 }
 
 // ─── Settings (mock) ──────────────────────────────────────────────────────────

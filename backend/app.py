@@ -8,6 +8,7 @@ from backend.extensions import db, jwt, cors
 from backend.routes.auth import auth_bp
 from backend.routes.predict import predict_bp
 from backend.routes.scans import scans_bp
+from backend.routes.dashboard import dashboard_bp
 
 # Allow any localhost port (covers 5173, 5174, etc.) plus whatever FRONTEND_URL is set to
 _ALLOWED_ORIGINS = [re.compile(r'http://localhost:\d+'), FRONTEND_URL]
@@ -43,6 +44,7 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(predict_bp, url_prefix='/api')
     app.register_blueprint(scans_bp, url_prefix='/api')
+    app.register_blueprint(dashboard_bp, url_prefix='/api')
 
     def _resolve_path(path_from_config):
         if os.path.isabs(path_from_config):
