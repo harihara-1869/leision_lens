@@ -143,14 +143,14 @@ def run_predict():
         nparr = np.frombuffer(image_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img_bgr is not None:
-            seg_result = seg_predict(img_bgr, threshold=0.5)
+            seg_result = seg_predict(img_bgr)
             seg_probs = seg_result['probabilities']
             overlay_img = seg_result['overlay']
 
-            # Individual masks
+            # Individual masks with per-channel thresholds
             mask_imgs = {}
             for i, name in enumerate(LESION_NAMES):
-                mask_imgs[name] = create_mask_image(seg_probs, i, threshold=0.5)
+                mask_imgs[name] = create_mask_image(seg_probs, i)
 
             seg_overlay_url, seg_masks = _save_segmentation(overlay_img, mask_imgs, scan.id)
             scan.seg_overlay_url = seg_overlay_url

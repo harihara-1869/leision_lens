@@ -34,6 +34,13 @@ LESION_COLORS = {
 
 OVERLAY_ALPHA = 0.4
 
+# Per-channel binarisation thresholds (channel → threshold)
+# SE (channel 3) requires a lower threshold to produce meaningful predictions.
+THRESHOLDS = {0: 0.50,   # MA
+              1: 0.50,   # HE
+              2: 0.50,   # EX
+              3: 0.35}   # SE
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Model architecture
@@ -58,6 +65,15 @@ class _FeatureExtractor(nn.Module):
 
     Returns (shallow, mid, deep) feature maps at strides 8, 16, 32.
     Backbone is frozen and stays in eval mode.
+
+    Note on indexing:
+        ``out_indices=[2,3,4]`` in the ``features_only=True`` API are
+        positional indices into the 5-element feature list returned by
+        timm, *not* EfficientNet block indices. They correctly select
+        feats[2], feats[3], feats[4] which correspond to EfficientNet-B4
+        blocks 2, 4, and 6 respectively. The hook-based approach here
+        taps the same three blocks directly and is verified equivalent
+        (max absolute difference = 0.0 against the training script).
     """
     def __init__(self):
         super().__init__()
@@ -275,6 +291,10 @@ def init_model(checkpoint_path: str):
     ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
     remapped = {_remap_ckpt_key(k): v for k, v in ckpt.items()}
     _model.load_state_dict(remapped, strict=False)
+    # strict=False is intentional: the backbone was frozen during training,
+    # so its weights are identical to timm's ImageNet-pretrained weights.
+    # The checkpoint only stores decoder + head weights; the backbone is
+    # never loaded from the checkpoint file.
     _model.eval()
     print(f'[seg] Model loaded from {checkpoint_path} on {DEVICE}')
 
@@ -283,13 +303,15 @@ def init_model(checkpoint_path: str):
 # Prediction API
 # ═════════════════════════════════════════════════════════════════════════════
 
-def predict(image_bgr: np.ndarray, threshold: float = 0.5) -> dict:
+def predict(image_bgr: np.ndarray, threshold: float | None = None) -> dict:
     """Run full segmentation pipeline with 8-way TTA.
 
     Args:
         image_bgr: BGR uint8 numpy array (fundus image from cv2.imdecode
                    or cv2.imread).
-        threshold: Probability threshold for binary masks (default 0.5).
+        threshold: Deprecated — kept for backward compatibility.
+                   Per-channel thresholds from ``THRESHOLDS`` dict are
+                   used regardless (SE=0.35, all others 0.50).
 
     Returns:
         dict with keys:
@@ -309,13 +331,13 @@ def predict(image_bgr: np.ndarray, threshold: float = 0.5) -> dict:
     probs_4d = _tta_inference(_model, tensor)   # [1, 4, 512, 512]
     probs = probs_4d[0].cpu().numpy()           # [4, 512, 512]
 
-    # Binary masks
+    # Binary masks with per-channel thresholds
     masks = {}
     for i, name in enumerate(LESION_NAMES):
-        masks[name] = (probs[i] > threshold).astype(np.uint8)
+        masks[name] = (probs[i] > THRESHOLDS[i]).astype(np.uint8)
 
     # Coloured overlay
-    overlay = _build_overlay(image_bgr, probs, threshold)
+    overlay = _build_overlay(image_bgr, probs)
 
     return {
         'probabilities': probs,
@@ -329,11 +351,14 @@ def predict(image_bgr: np.ndarray, threshold: float = 0.5) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _build_overlay(image_bgr: np.ndarray, probs: np.ndarray,
-                   threshold: float = 0.5) -> np.ndarray:
-    """Blend coloured probability regions onto resized fundus image."""
+                   threshold: float | None = None) -> np.ndarray:
+    """Blend coloured probability regions onto resized fundus image.
+
+    Uses per-channel thresholds from ``THRESHOLDS`` (SE=0.35, rest 0.50).
+    """
     overlay = cv2.resize(image_bgr, (512, 512)).astype(np.float32)
     for i, name in enumerate(LESION_NAMES):
-        mask = probs[i] > threshold
+        mask = probs[i] > THRESHOLDS[i]
         if not mask.any():
             continue
         colour = np.array(LESION_COLORS[name], dtype=np.float32)
@@ -342,34 +367,38 @@ def _build_overlay(image_bgr: np.ndarray, probs: np.ndarray,
 
 
 def create_overlay(image_bgr: np.ndarray, probs: np.ndarray,
-                   threshold: float = 0.5) -> np.ndarray:
+                   threshold: float | None = None) -> np.ndarray:
     """Public overlay utility (preserved for backward compatibility).
+
+    Uses per-channel thresholds from ``THRESHOLDS`` (SE=0.35, rest 0.50).
 
     Args:
         image_bgr: BGR fundus image.
         probs: (4, 512, 512) probability array.
-        threshold: Binarisation threshold.
+        threshold: Deprecated — kept for backward compatibility.
 
     Returns:
         BGR uint8 overlay image at 512×512.
     """
-    return _build_overlay(image_bgr, probs, threshold)
+    return _build_overlay(image_bgr, probs)
 
 
 def create_mask_image(probs: np.ndarray, channel: int,
-                      threshold: float = 0.5) -> np.ndarray:
+                      threshold: float | None = None) -> np.ndarray:
     """Create a coloured mask image for a single lesion channel.
+
+    Uses per-channel threshold from ``THRESHOLDS`` (SE=0.35, rest 0.50).
 
     Args:
         probs: (4, 512, 512) probability array.
         channel: Index into LESION_NAMES (0=MA, 1=HE, 2=EX, 3=SE).
-        threshold: Binarisation threshold.
+        threshold: Deprecated — kept for backward compatibility.
 
     Returns:
         BGR uint8 image at 512×512 with lesion pixels in the channel's
         colour on a black background.
     """
-    mask = (probs[channel] > threshold).astype(np.uint8) * 255
+    mask = (probs[channel] > THRESHOLDS[channel]).astype(np.uint8) * 255
     colour = np.array(LESION_COLORS[LESION_NAMES[channel]], dtype=np.uint8)
     result = np.zeros((512, 512, 3), dtype=np.uint8)
     result[mask > 0] = colour

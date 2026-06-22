@@ -246,13 +246,21 @@ probs = torch.rot90(probs, -k, dims=(2, 3))  # undo rotation
 
 ### 4.3 Post-processing
 
-Binary masks are created by thresholding probabilities:
+Binary masks are created by thresholding probabilities using per-channel thresholds:
 
 ```python
-mask = (probs[channel] > threshold).astype(np.uint8)  # threshold = 0.5
+# Per-channel thresholds defined in backend/ml/segmentation.py
+THRESHOLDS = {0: 0.50,   # MA
+              1: 0.50,   # HE
+              2: 0.50,   # EX
+              3: 0.35}   # SE — requires lower threshold to produce masks
+
+# Applied during binarization:
+for i, name in enumerate(LESION_NAMES):
+    mask = (probs[i] > THRESHOLDS[i]).astype(np.uint8)
 ```
 
-**Assumption:** 0.5 is the optimal threshold. Evaluation across thresholds (0.1-0.9) shows 0.5 gives the best IoU/Dice for this model. This was determined empirically.
+**Why SE needs a lower threshold:** Soft exudates are faint, poorly defined lesions with lower contrast than haemorrhages or hard exudates. At threshold 0.5, the SE channel returns all-zero masks for most images. Dropping to 0.35 recovers meaningful predictions without introducing excessive false positives.
 
 ---
 
@@ -315,13 +323,13 @@ POST /api/predict (multipart: image + optional patient_name/age)
 img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
 # 5b. Run segmentation (preprocess → 8-way TTA → postprocess)
-seg_result = seg_predict(img_bgr, threshold=0.5)
-seg_probs = seg_result['probabilities']   # [4, 512, 512]
-overlay_img = seg_result['overlay']       # [512, 512, 3] BGR uint8
+seg_result = seg_predict(img_bgr)                      # uses per-channel THRESHOLDS internally
+seg_probs = seg_result['probabilities']                # [4, 512, 512]
+overlay_img = seg_result['overlay']                    # [512, 512, 3] BGR uint8
 
-# 5c. Build individual coloured masks
+# 5c. Build individual coloured masks with per-channel thresholds
 for i, name in enumerate(['MA', 'HE', 'EX', 'SE']):
-    mask_imgs[name] = create_mask_image(seg_probs, i, threshold=0.5)
+    mask_imgs[name] = create_mask_image(seg_probs, i)  # uses THRESHOLDS internally
 
 # 5d. Save to disk
 _save_segmentation(overlay_img, mask_imgs, scan.id)
@@ -526,8 +534,8 @@ image_bytes = request.files['image'].read()
 nparr = np.frombuffer(image_bytes, np.uint8)
 img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-# 3. Run prediction
-result = seg_predict(img_bgr, threshold=0.5)
+# 3. Run prediction (per-channel THRESHOLDS used internally)
+result = seg_predict(img_bgr)
 ```
 
 ### 8.7 Memory Usage

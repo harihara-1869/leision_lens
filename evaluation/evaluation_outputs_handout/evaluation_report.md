@@ -5,7 +5,7 @@
 **Ground truth**: Individual TIF masks (official IDRiD, values [0, 76])
 **Preprocessing**: Ben Graham + CLAHE + ImageNet norm
 **TTA**: 8-way (4 rotations × 2 flips)
-**Threshold**: 0.5
+**Threshold**: Per-channel — MA/HE/EX=0.50, SE=0.35
 **Test samples**: 27 images (27 MA, 27 HE, 27 EX, 14 SE)
 **Device**: cuda
 
@@ -16,14 +16,14 @@
 | MA | 27 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | +0.0000 | +0.0000 | ✓ |
 | HE | 27 | 0.2693 | 0.4008 | 0.2694 | 0.3834 | -0.0001 | +0.0174 | ✗ |
 | EX | 27 | 0.2710 | 0.4081 | 0.2922 | 0.4349 | -0.0212 | -0.0268 | ✗ |
-| SE | 14 | 0.4283 | 0.5599 | 0.4286 | 0.5596 | -0.0003 | +0.0003 | ✓ |
-| **Macro** | **95** | **0.2167** | **0.3124** | — | — | — | — | — |
+| SE | 14 | 0.4056 | 0.5427 | 0.4286 | 0.5596 | -0.0230 | -0.0169 | ✗ |
+| **Macro** | **95** | **0.2133** | **0.3099** | — | — | — | — | — |
 
 ## Verdict
 
 **✗ Handout Results Not Reproduced**
 
-2/4 classes match the handout within ±0.005 tolerance.
+1/4 classes match the handout within ±0.005 tolerance.
 
 ## Debugging Summary
 

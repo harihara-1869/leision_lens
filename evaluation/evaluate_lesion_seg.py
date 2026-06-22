@@ -19,7 +19,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(PROJECT_ROOT)
 sys.path.insert(0, PROJECT_ROOT)
 
-from backend.ml.segmentation import LesionSegmentationModel, preprocess, _tta_inference
+from backend.ml.segmentation import LesionSegmentationModel, preprocess, _tta_inference, THRESHOLDS
 
 # Paths
 IDRID_BASE   = os.path.join(PROJECT_ROOT, 'data', 'idrid_official', 'A. Segmentation', 'A. Segmentation')
@@ -152,7 +152,7 @@ def main():
             if gt_bin is None:
                 continue
             ch = LESION_NAMES.index(lesion)
-            pred_bin = (probs[ch] > 0.5).astype(np.uint8)
+            pred_bin = (probs[ch] > THRESHOLDS[ch]).astype(np.uint8)
 
             iou  = compute_iou(pred_bin, gt_bin)
             dice = compute_dice(pred_bin, gt_bin)
@@ -246,7 +246,7 @@ def main():
             'checkpoint': CKPT_PATH,
             'preprocessing': 'Ben Graham + CLAHE + ImageNet norm',
             'tta': '8-way (4 rotations × 2 flips)',
-            'threshold': 0.5,
+            'threshold': f'Per-channel: MA/HE/EX=0.50, SE=0.35 ({dict(THRESHOLDS)})',
             'ground_truth': 'Individual TIF masks (official IDRiD)',
             'resize': '512×512',
             'device': str(DEVICE),
@@ -270,7 +270,7 @@ def main():
 **Ground truth**: Individual TIF masks (official IDRiD, values [0, 76])
 **Preprocessing**: Ben Graham + CLAHE + ImageNet norm
 **TTA**: 8-way (4 rotations × 2 flips)
-**Threshold**: 0.5
+**Threshold**: Per-channel — MA/HE/EX=0.50, SE=0.35
 **Test samples**: {len(dataset)} images ({sum(1 for it in dataset if 'MA' in it['masks'])} MA, {sum(1 for it in dataset if 'HE' in it['masks'])} HE, {sum(1 for it in dataset if 'EX' in it['masks'])} EX, {sum(1 for it in dataset if 'SE' in it['masks'])} SE)
 **Device**: {DEVICE}
 

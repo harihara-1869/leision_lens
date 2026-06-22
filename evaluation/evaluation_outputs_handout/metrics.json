@@ -4,7 +4,7 @@
     "checkpoint": "/home/harihara-1869/Animplays/B.E(RVCE)/2nd Year/4th Sem/Main EL/leison-lens/checkpoints/lesion_seg_v2.pth",
     "preprocessing": "Ben Graham + CLAHE + ImageNet norm",
     "tta": "8-way (4 rotations \u00d7 2 flips)",
-    "threshold": 0.5,
+    "threshold": "Per-channel: MA/HE/EX=0.50, SE=0.35 ({0: 0.5, 1: 0.5, 2: 0.5, 3: 0.35})",
     "ground_truth": "Individual TIF masks (official IDRiD)",
     "resize": "512\u00d7512",
     "device": "cuda"
@@ -39,17 +39,17 @@
     },
     "SE": {
       "n": 14,
-      "mean_iou": 0.428344,
-      "mean_dice": 0.559854,
+      "mean_iou": 0.405561,
+      "mean_dice": 0.542727,
       "handout_iou": 0.4286,
       "handout_dice": 0.5596,
-      "iou_diff": -0.000256,
-      "dice_diff": 0.000254
+      "iou_diff": -0.023039,
+      "dice_diff": -0.016873
     }
   },
   "macro": {
-    "iou": 0.2167,
-    "dice": 0.312425
+    "iou": 0.213342,
+    "dice": 0.309901
   },
   "verdict": "\u2717 Handout Results Not Reproduced",
   "evaluation_time_s": 8.1

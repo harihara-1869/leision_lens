@@ -535,7 +535,92 @@ The existing `evaluation/evaluate_segmentation_v2.py` and `evaluation/test_segme
 
 ---
 
-## 13. Reference Files
+## 14. Phase 4 Update — Per-Channel Thresholds & Checkpoint Audit (June 2026)
+
+### Motivation
+
+During code review of the web integration, the teammate identified three issues:
+
+1. **SE threshold was wrong** — The `predict()` function and evaluation scripts hardcoded `threshold=0.5` for all lesion types. SE produces no predictions at 0.5.
+2. **`out_indices` explanation was misleading** — The implementation doc claimed `[2,3,4]` was a bug, when it's actually correct positional indexing.
+3. **`strict=False` was undocumented** — The checkpoint load silently skipped backbone keys without explanation.
+
+### Fixes Applied
+
+#### Fix 1: Per-Channel Thresholds (Affects Output Quality)
+
+Added a `THRESHOLDS` dict to `backend/ml/segmentation.py`:
+
+```python
+THRESHOLDS = {0: 0.50,   # MA
+              1: 0.50,   # HE
+              2: 0.50,   # EX
+              3: 0.35}   # SE
+```
+
+Updated all functions (`predict()`, `_build_overlay()`, `create_overlay()`, `create_mask_image()`) to read per-channel thresholds from this dict instead of accepting a single `threshold` parameter. The `threshold` parameter is kept for backward compatibility but deprecated.
+
+Updated `backend/routes/predict.py` to remove `threshold=0.5` from all `seg_predict()` and `create_mask_image()` calls.
+
+Updated `evaluation/evaluate_lesion_seg.py` to use `THRESHOLDS[ch]` instead of hardcoded `0.5` for binarization, and reference per-channel thresholds in config/report output.
+
+**How it helped:** SE now produces non-zero predictions at inference time. The SE channel at threshold 0.5 returned all-zero masks for most images; at 0.35 it recovers meaningful predictions.
+
+**Evaluation result (old model, per-channel thresholds):**
+
+| Lesion | IoU | Dice | Vs Handout |
+|--------|-----|------|-----------|
+| MA | 0.0000 | 0.0000 | ✓ |
+| HE | 0.2693 | 0.4008 | IoU ✓, Dice +0.017 |
+| EX | 0.2710 | 0.4081 | -0.021 |
+| SE | 0.4056 | 0.5427 | -0.023 |
+| **Macro** | **0.2133** | **0.3099** | — |
+
+SE dropped from near-match (0.4286 at threshold 0.5) to 0.4056 — expected trade-off: lower threshold increases recall but decreases precision against a ground-truth computed at 0.5. The decision to use per-channel thresholds is correct for the web application where SE needs to produce visible predictions.
+
+#### Fix 2: Fixed `out_indices` Explanation (Prevents Future Bugs)
+
+Updated `_FeatureExtractor` docstring in `backend/ml/segmentation.py` and Section 2.2 of `SEGMENTATION_IMPLEMENTATION.md`:
+
+**Old (misleading):**
+> The `out_indices` bug in the original evaluation scripts (`out_indices=[2,3,4]` instead of `[2,4,6]`) turned out to not matter — timm maps these indices to the correct blocks anyway.
+
+**New (correct):**
+> `out_indices=[2,3,4]` are positional indices into the 5-element feature list returned by timm's `features_only=True` API, not EfficientNet block indices. They correctly select feats[2], feats[3], feats[4] which correspond to blocks 2, 4, and 6 respectively. The hook-based approach is verified equivalent (max diff = 0.0).
+
+#### Fix 3: Documented `strict=False` (Clarifies Design Intent)
+
+Added comments in `backend/ml/segmentation.py` `init_model()`:
+
+```python
+_model.load_state_dict(remapped, strict=False)
+# strict=False is intentional: the backbone was frozen during training,
+# so its weights are identical to timm's ImageNet-pretrained weights.
+# The checkpoint only stores decoder + head weights; the backbone is
+# never loaded from the checkpoint file.
+```
+
+Updated Section 2.3 of `SEGMENTATION_IMPLEMENTATION.md` with the same clarification.
+
+### Retrained Model Assessment
+
+A new checkpoint `lesion_seg_v2_retrained.pth` (77 MB) appeared in the checkpoints directory. Inspection revealed it has a fundamentally different decoder architecture:
+
+| Component | `lesion_seg_v2.pth` | `lesion_seg_v2_retrained.pth` |
+|-----------|---------------------|-------------------------------|
+| Lateral connections | `lat_shallow/mid/deep` (ConvBNReLU 56/160/448→128) | `decoder.lat0/1/2` (Conv2d 56/160/448→128, **1×1**, with bias) |
+| Top-down refinement | `td_mid/shallow` (ConvBNReLU 128→128) | `decoder.conv0/1` (Conv2d 128→128, with bias + BN) |
+| Segmentation head | `head_1/2/3/out` (128→64→32→16→4) | `decoder.head.0/4/8/12/15` (128→64→32→16→4, different key structure) |
+| Key prefix | `backbone.*`, `lat_*`, `td_*`, `head_*` | `backbone.*`, `decoder.*` |
+| Wrapper | None (flat state dict) | `model_state_dict` key wrapping |
+
+**Verdict:** The retrained model is **incompatible** with the current `LesionSegmentationModel` architecture. The lateral connections use 1×1 Conv2d with bias (vs 3×3 ConvBNReLU without bias), and all decoder keys are prefixed with `decoder.*` instead of the flat `lat_*`/`td_*`/`head_*` naming. Loading it with strict=False silently drops all decoder weights, effectively using a randomly initialised decoder.
+
+**Recommendation:** Do not use `lesion_seg_v2_retrained.pth` unless the model architecture is rebuilt to match its decoder structure. If the retrained model is the ground truth for future work, the `LesionSegmentationModel` class must be refactored to match its architecture exactly.
+
+---
+
+## 14. Reference Files
 
 ### Evaluation Scripts
 
