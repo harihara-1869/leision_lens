@@ -1,7 +1,6 @@
 import os
 import re
-import sqlalchemy as sa
-from flask import Flask, send_from_directory
+from flask import Flask
 from backend.config import (SECRET_KEY, JWT_SECRET_KEY, DATABASE_URL,
                             CHECKPOINT_PATH, SEG_CHECKPOINT_PATH, FRONTEND_URL)
 from backend.extensions import db, jwt, cors
@@ -14,7 +13,10 @@ _ALLOWED_ORIGINS = [re.compile(r'http://localhost:\d+'), FRONTEND_URL]
 
 
 def create_app():
-    app = Flask(__name__, static_folder='static', static_url_path='/static')
+    # Resolve the project-level instance/ directory for static files
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    instance_dir = os.path.join(project_root, 'instance')
+    app = Flask(__name__, static_folder=instance_dir, static_url_path='/static')
 
     app.config['SECRET_KEY'] = SECRET_KEY
     app.config['JWT_SECRET_KEY'] = JWT_SECRET_KEY
@@ -79,10 +81,9 @@ def create_app():
             print(f'[WARNING] Segmentation model failed to load: {exc}')
             print('[WARNING] Lesion segmentation will be skipped during inference.')
 
-        # Ensure static output directories exist
-        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+        # Ensure instance output directories exist
         for sub in ['heatmaps', 'segmentations', 'uploads']:
-            os.makedirs(os.path.join(static_dir, sub), exist_ok=True)
+            os.makedirs(os.path.join(instance_dir, sub), exist_ok=True)
 
     return app
 

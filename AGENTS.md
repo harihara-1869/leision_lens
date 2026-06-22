@@ -6,25 +6,26 @@ See @README.md for project overview and @package.json for available npm/pnpm com
 ## Architecture: Image Serving Pipeline
 
 ### Where images are stored
-All generated images live under `backend/static/` with subdirectories:
+All generated images live under `instance/` (project root, gitignored) with subdirectories:
 
 | Directory | Contents | URL pattern |
 |-----------|----------|-------------|
-| `static/uploads/` | Original uploaded fundus images | `/static/uploads/scan_{id}.png` |
-| `static/heatmaps/` | Grad-CAM heatmap overlays | `/static/heatmaps/scan_{id}.png` |
-| `static/segmentations/` | Lesion segmentation overlays + masks | `/static/segmentations/scan_{id}_overlay.png`<br>`/static/segmentations/scan_{id}_MA.png`<br>`/static/segmentations/scan_{id}_HE.png`<br>`/static/segmentations/scan_{id}_EX.png`<br>`/static/segmentations/scan_{id}_SE.png` |
+| `instance/uploads/` | Original uploaded fundus images | `/static/uploads/scan_{id}.png` |
+| `instance/heatmaps/` | Grad-CAM heatmap overlays | `/static/heatmaps/scan_{id}.png` |
+| `instance/segmentations/` | Lesion segmentation overlays + masks | `/static/segmentations/scan_{id}_overlay.png`<br>`/static/segmentations/scan_{id}_MA.png`<br>`/static/segmentations/scan_{id}_HE.png`<br>`/static/segmentations/scan_{id}_EX.png`<br>`/static/segmentations/scan_{id}_SE.png` |
+| `instance/app.db` | SQLite database | — |
 
 ### How images are served
-1. **Flask** (`backend/app.py`): `static_folder='static', static_url_path='/static'` — serves everything under `backend/static/` at `/static/*`
+1. **Flask** (`backend/app.py`): `static_folder=instance_dir, static_url_path='/static'` — serves everything under `instance/` at `/static/*`
 2. **Vite proxy** (`frontend/vite.config.js`): Forwards `/static` requests from dev server (port 5173) to Flask (port 5000)
-3. **Flow**: Browser → `localhost:5173/static/...` → Vite proxy → `localhost:5000/static/...` → Flask static files
+3. **Flow**: Browser → `localhost:5173/static/...` → Vite proxy → `localhost:5000/static/...` → Flask reads from `instance/`
 
 ### Predict pipeline (POST /api/predict)
 Order of operations in `backend/routes/predict.py`:
 1. DR grade prediction (EfficientNet-B4 multi-task)
-2. Save original image → `static/uploads/scan_{id}.png`
-3. Grad-CAM heatmap → `static/heatmaps/scan_{id}.png`
-4. Lesion segmentation → `static/segmentations/scan_{id}_overlay.png` + per-lesion masks
+2. Save original image → `instance/uploads/scan_{id}.png`
+3. Grad-CAM heatmap → `instance/heatmaps/scan_{id}.png`
+4. Lesion segmentation → `instance/segmentations/scan_{id}_overlay.png` + per-lesion masks
 
 Each step has try/except — if any fails, the others still proceed.
 

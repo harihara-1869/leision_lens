@@ -16,12 +16,12 @@ from backend.ml.segmentation import create_overlay, create_mask_image, LESION_NA
 
 predict_bp = Blueprint('predict', __name__)
 
-# Directories for static outputs (relative to backend/)
-STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          'static')
-HEATMAP_DIR = os.path.join(STATIC_DIR, 'heatmaps')
-SEG_DIR = os.path.join(STATIC_DIR, 'segmentations')
-UPLOADS_DIR = os.path.join(STATIC_DIR, 'uploads')
+# Directories for static outputs (under project instance/)
+INSTANCE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            'instance')
+HEATMAP_DIR = os.path.join(INSTANCE_DIR, 'heatmaps')
+SEG_DIR = os.path.join(INSTANCE_DIR, 'segmentations')
+UPLOADS_DIR = os.path.join(INSTANCE_DIR, 'uploads')
 
 
 def _save_original(image_bytes: bytes, scan_id: int) -> str:
