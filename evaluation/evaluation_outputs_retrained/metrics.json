@@ -1,0 +1,68 @@
+{
+  "config": {
+    "model": "LesionSegModelV2 (EfficientNet-B4 + FPN)",
+    "checkpoint": "checkpoints/lesion_seg_v2_retrained.pth",
+    "preprocessing": "Ben Graham + CLAHE + ImageNet norm",
+    "tta": "8-way (4 rotations \u00d7 2 flips)",
+    "threshold": 0.5,
+    "input_size": "512x512"
+  },
+  "per_class": {
+    "MA": {
+      "n": 27,
+      "mean_iou": 0.0,
+      "mean_dice": 0.0,
+      "std_iou": 0.0
+    },
+    "HE": {
+      "n": 27,
+      "mean_iou": 0.0,
+      "mean_dice": 0.0,
+      "std_iou": 0.0
+    },
+    "EX": {
+      "n": 27,
+      "mean_iou": 0.0,
+      "mean_dice": 0.0,
+      "std_iou": 0.0
+    },
+    "SE": {
+      "n": 14,
+      "mean_iou": 0.0,
+      "mean_dice": 0.0,
+      "std_iou": 0.0
+    }
+  },
+  "macro": {
+    "iou": 0.0,
+    "dice": 0.0
+  },
+  "handout_comparison": {
+    "MA": {
+      "metric": "IoU",
+      "handout": null,
+      "measured": 0.0,
+      "diff": null
+    },
+    "HE": {
+      "metric": "IoU",
+      "handout": 0.2694,
+      "measured": 0.0,
+      "diff": -0.2694
+    },
+    "EX": {
+      "metric": "IoU",
+      "handout": 0.2922,
+      "measured": 0.0,
+      "diff": -0.2922
+    },
+    "SE": {
+      "metric": "IoU",
+      "handout": 0.4286,
+      "measured": 0.0,
+      "diff": -0.4286
+    }
+  },
+  "verdict": "Not Reproduced",
+  "evaluation_time_s": 9.1
+}
