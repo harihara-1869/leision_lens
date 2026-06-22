@@ -1,5 +1,6 @@
 import os
 import re
+import datetime
 from flask import Flask
 from backend.config import (SECRET_KEY, JWT_SECRET_KEY, DATABASE_URL,
                             CHECKPOINT_PATH, SEG_CHECKPOINT_PATH, FRONTEND_URL)
@@ -26,6 +27,7 @@ def create_app():
     app.config['JWT_ALGORITHM'] = 'HS256'
     app.config['JWT_HEADER_NAME'] = 'Authorization'
     app.config['JWT_HEADER_TYPE'] = 'Bearer'
+    app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=2)
 
     db.init_app(app)
     jwt.init_app(app)

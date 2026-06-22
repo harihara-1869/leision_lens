@@ -40,9 +40,13 @@ import SettingsPage       from './pages/SettingsPage.jsx'
 
 // ── ProtectedRoute ────────────────────────────────────────────────────────────
 // Wraps any route that requires the user to be signed in.
+// Shows nothing during rehydration to avoid flashing the login page on refresh.
 function ProtectedRoute({ children }) {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, loading } = useAuth()
   const location = useLocation()
+
+  // Still rehydrating from localStorage — don't redirect yet
+  if (loading) return null
 
   if (!isAuthenticated) {
     // Pass current path so LoginPage can redirect back after login
