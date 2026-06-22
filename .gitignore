@@ -42,6 +42,9 @@ backend/static/heatmaps/
 backend/static/segmentations/
 backend/static/uploads/
 
+# SQLite database — never commit this
+instance/
+
 # Kaggle credentials - NEVER commit this
 kaggle.json
 .kaggle/

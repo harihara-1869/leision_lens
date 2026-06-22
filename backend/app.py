@@ -1,5 +1,6 @@
 import os
 import re
+import sqlalchemy as sa
 from flask import Flask, send_from_directory
 from backend.config import (SECRET_KEY, JWT_SECRET_KEY, DATABASE_URL,
                             CHECKPOINT_PATH, SEG_CHECKPOINT_PATH, FRONTEND_URL)
@@ -48,6 +49,17 @@ def create_app():
     with app.app_context():
         from backend.models import user, scan  # noqa: F401 — registers models
         db.create_all()
+
+        # SQLite performance pragmas
+        if 'sqlite' in db.engine.url.drivername:
+            from sqlalchemy import event
+            @event.listens_for(db.engine, 'connect')
+            def _set_pragmas(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute('PRAGMA journal_mode=WAL')
+                cursor.execute('PRAGMA synchronous=NORMAL')
+                cursor.execute('PRAGMA foreign_keys=ON')
+                cursor.close()
 
         # ── Load DR grading model ────────────────────────────────────────
         grading_ckpt = _resolve_path(CHECKPOINT_PATH)
