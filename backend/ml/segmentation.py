@@ -120,56 +120,64 @@ class LesionSegmentationModel(nn.Module):
         Mid     — blocks[4]:  160 ch, stride 16 (32×32)
         Deep    — blocks[6]:  448 ch, stride 32 (16×16)
 
-    Decoder:
-        Lateral ConvBNReLU(•→128) on each level
-        Top-down: deep → mid → shallow via bilinear upsampling + addition
-        Segmentation head: ConvBNReLU → upsample×3 → Conv2d(16→4)
+    Decoder architecture matches the ``decoder.*`` keys found in
+    ``checkpoints/lesion_seg_v2.pth`` exactly (1×1 Conv+bias laterals,
+    3×3 Conv+BN+ReLU top-down refinement, 4-stage upsampling head):
+        lat0/1/2:  1×1 Conv(56/160/448 → 128), with bias
+        conv0/1/2: 3×3 Conv(128→128) + BN + ReLU, with bias
+        head:      Conv+BN+ReLU ×3 (128→64→32→16) interleaved with
+                   ×2 upsampling, then 1×1 Conv(16→4)
     """
     def __init__(self):
         super().__init__()
         self.encoder = _FeatureExtractor()
 
-        # ── Lateral projections (all → 128 channels) ───────────────────────
-        self.lat_shallow = ConvBNReLU(56, 128)
-        self.lat_mid     = ConvBNReLU(160, 128)
-        self.lat_deep    = ConvBNReLU(448, 128)
+        # ── Lateral projections (1×1 conv with bias, all → 128 channels) ───
+        self.decoder = nn.Module()
+        self.decoder.lat0 = nn.Conv2d(56, 128, 1)
+        self.decoder.lat1 = nn.Conv2d(160, 128, 1)
+        self.decoder.lat2 = nn.Conv2d(448, 128, 1)
 
-        # ── Top-down refinement ─────────────────────────────────────────────
-        self.td_mid     = ConvBNReLU(128, 128)
-        self.td_shallow = ConvBNReLU(128, 128)
+        # ── Top-down refinement (3×3 conv + BN + ReLU, with bias) ──────────
+        self.decoder.conv0 = nn.Sequential(
+            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True))
+        self.decoder.conv1 = nn.Sequential(
+            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True))
+        self.decoder.conv2 = nn.Sequential(
+            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True))
 
         # ── Segmentation head (128ch, 64×64 → 4ch, 512×512) ────────────────
-        self.head_1    = ConvBNReLU(128, 64)
-        self.head_2    = ConvBNReLU(64, 32)
-        self.head_3    = ConvBNReLU(32, 16)
-        self.head_out  = nn.Conv2d(16, 4, 1)   # 1×1 pointwise → 4 logits
+        self.decoder.head = nn.Sequential(
+            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),  # 0,1,2
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),               # 3
+            nn.Conv2d(128, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),     # 4,5,6
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),               # 7
+            nn.Conv2d(64, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(inplace=True),      # 8,9,10
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),               # 11
+            nn.Conv2d(32, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(inplace=True),      # 12,13,14
+            nn.Conv2d(16, 4, 1),                                                              # 15
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Hook-based feature extraction (backbone frozen, no gradients)
         fs, fm, fd = self.encoder(x)
 
-        # Lateral projections
-        ld = self.lat_deep(fd)        # 448→128, stride 32 (16×16)
-        lm = self.lat_mid(fm)         # 160→128, stride 16 (32×32)
-        ls = self.lat_shallow(fs)     #  56→128, stride 8  (64×64)
+        # Lateral projections (1×1 conv, no activation)
+        l0 = self.decoder.lat0(fs)    #  56→128, stride 8  (64×64)
+        l1 = self.decoder.lat1(fm)    # 160→128, stride 16 (32×32)
+        l2 = self.decoder.lat2(fd)    # 448→128, stride 32 (16×16)
 
         # Top-down pathway: deep → mid → shallow
-        fd_up = F.interpolate(ld, scale_factor=2, mode='bilinear', align_corners=False)
-        rm = self.td_mid(lm + fd_up)  # fused mid: 128ch, stride 16
+        p2 = self.decoder.conv2(l2)   # smooth deepest level, 16×16
 
-        fm_up = F.interpolate(rm, scale_factor=2, mode='bilinear', align_corners=False)
-        rs = self.td_shallow(ls + fm_up)  # fused shallow: 128ch, stride 8
+        p2_up = F.interpolate(p2, scale_factor=2, mode='bilinear', align_corners=False)
+        p1 = self.decoder.conv1(l1 + p2_up)   # fused mid: 128ch, 32×32
+
+        p1_up = F.interpolate(p1, scale_factor=2, mode='bilinear', align_corners=False)
+        p0 = self.decoder.conv0(l0 + p1_up)   # fused shallow: 128ch, 64×64
 
         # Segmentation head: upsample ×3 (stride 8 → stride 1)
-        x = self.head_1(rs)
-        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
-        x = self.head_2(x)
-        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
-        x = self.head_3(x)
-        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
-        x = self.head_out(x)          # [B, 4, 512, 512]
-
-        return x
+        return self.decoder.head(p0)   # [B, 4, 512, 512]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -258,43 +266,37 @@ def _tta_inference(model: nn.Module, tensor: torch.Tensor) -> torch.Tensor:
 
 _model: LesionSegmentationModel | None = None
 
-# Key remapping from old checkpoint format to new model.
-# Checkpoint trained with backbone.* and head.N.* keys,
-# model uses encoder.backbone.* and head_M.* keys.
-_HEAD_REMAP = {
-    'head.0.': 'head_1.',
-    'head.2.': 'head_2.',
-    'head.4.': 'head_3.',
-    'head.6.': 'head_out.',
-}
-
-
+# Checkpoint key prefix remapping: backbone.* (encoder) stays under
+# encoder.backbone.*; decoder.* keys (lat0/1/2, conv0/1/2, head.*) match
+# the LesionSegmentationModel.decoder submodule names exactly.
 def _remap_ckpt_key(key: str) -> str:
-    """Remap old checkpoint key to new model key."""
+    """Remap checkpoint key to model key."""
     if key.startswith('backbone.'):
         return 'encoder.' + key
-    for old_pfx, new_pfx in _HEAD_REMAP.items():
-        if key.startswith(old_pfx):
-            return key.replace(old_pfx, new_pfx, 1)
-    return key  # lat_*, td_* keys unchanged
+    return key  # decoder.* keys unchanged
 
 
 def init_model(checkpoint_path: str):
     """Load checkpoint and initialise the segmentation model singleton.
 
-    Handles key remapping from the old checkpoint format
-    (``backbone.*``, ``head.N.*``) to the new model's
-    (``encoder.backbone.*``, ``head_M.*``).
+    The checkpoint stores backbone weights under ``backbone.*`` (remapped
+    to ``encoder.backbone.*``) and decoder weights under ``decoder.*``
+    (matches the model's ``decoder`` submodule exactly — loads strict).
     """
     global _model
     _model = LesionSegmentationModel().to(DEVICE)
     ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
+    if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+        ckpt = ckpt['model_state_dict']
     remapped = {_remap_ckpt_key(k): v for k, v in ckpt.items()}
-    _model.load_state_dict(remapped, strict=False)
-    # strict=False is intentional: the backbone was frozen during training,
-    # so its weights are identical to timm's ImageNet-pretrained weights.
-    # The checkpoint only stores decoder + head weights; the backbone is
-    # never loaded from the checkpoint file.
+    missing, unexpected = _model.load_state_dict(remapped, strict=False)
+    # Backbone weights load from the checkpoint directly now (encoder.backbone.*
+    # matches backbone.* 1:1); strict=False only tolerates timm's `conv_head`/`bn2`
+    # keys absent because global_pool='' + num_classes=0 drops the classifier head.
+    if missing:
+        print(f'[seg] WARNING: {len(missing)} missing keys, e.g. {missing[:5]}')
+    if unexpected:
+        print(f'[seg] {len(unexpected)} unexpected checkpoint keys ignored (unused backbone head), e.g. {unexpected[:5]}')
     _model.eval()
     print(f'[seg] Model loaded from {checkpoint_path} on {DEVICE}')
 

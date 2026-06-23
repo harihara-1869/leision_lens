@@ -84,13 +84,15 @@ export default function ResultsDetailPage() {
       {/* ─── 2. Side-by-side: Original + Grad-CAM ───────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {/* Original scan */}
-        <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-96">
-          <img
-            src={result.originalUrl}
-            alt="Original retinal scan"
-            className="w-full h-full object-cover grayscale opacity-90 group-hover:scale-105 transition-transform duration-700"
-          />
-          <div className="absolute top-4 left-4 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
+        <div className="glass bg-white/30 rounded-3xl p-6 md:p-8 flex flex-col items-center">
+          <div className="aspect-square w-64 md:w-80 rounded-2xl overflow-hidden relative group bg-black">
+            <img
+              src={result.originalUrl}
+              alt="Original retinal scan"
+              className="w-full h-full object-contain opacity-90 group-hover:scale-105 transition-transform duration-700"
+            />
+          </div>
+          <div className="mt-4 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20">
             <span className="font-mono text-[10px] text-white uppercase tracking-widest">
               Original Scan
             </span>
@@ -98,23 +100,24 @@ export default function ResultsDetailPage() {
         </div>
 
         {/* Grad-CAM heatmap */}
-        <div className="glass bg-white/30 rounded-3xl overflow-hidden relative group h-64 md:h-96">
-          <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/20 to-orange-500/20 mix-blend-overlay z-10" />
-          <img
-            src={result.heatmapUrl}
-            alt="AI Grad-CAM heatmap overlay"
-            className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700"
-          />
-          <div className="absolute top-4 left-4 bg-primary/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 z-20">
+        <div className="glass bg-white/30 rounded-3xl p-6 md:p-8 flex flex-col items-center">
+          <div className="aspect-square w-64 md:w-80 rounded-2xl overflow-hidden relative group border-2 border-primary-container/40 bg-black">
+            <div className="absolute inset-0 bg-gradient-to-tr from-violet-500/20 to-orange-500/20 mix-blend-overlay z-10" />
+            <img
+              src={result.heatmapUrl}
+              alt="AI Grad-CAM heatmap overlay"
+              className="w-full h-full object-contain opacity-80 group-hover:scale-105 transition-transform duration-700"
+            />
+            <div className="absolute bottom-3 right-3 flex gap-2 z-20">
+              <div className="w-2 h-2 rounded-full bg-orange-400" />
+              <div className="w-2 h-2 rounded-full bg-violet-400" />
+            </div>
+          </div>
+          <div className="mt-4 bg-primary/40 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/20 z-20">
             <span className="font-mono text-[10px] text-white uppercase tracking-widest">
               AI Heatmap Overlay
             </span>
           </div>
-          <div className="absolute bottom-4 right-4 flex gap-2 z-20">
-            <div className="w-2 h-2 rounded-full bg-orange-400" />
-            <div className="w-2 h-2 rounded-full bg-violet-400" />
-          </div>
-          <div className="absolute inset-0 border-2 border-primary-container/40 rounded-3xl pointer-events-none" />
         </div>
       </div>
 
